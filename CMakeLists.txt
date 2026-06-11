@@ -11,6 +11,9 @@ option(USQUE_BUILD_TESTS "Build tests" ON)
 option(USQUE_BUILD_EXAMPLES "Build examples" ON)
 
 include(FetchContent)
+set(RAPIDJSON_BUILD_DOC OFF CACHE BOOL "" FORCE)
+set(RAPIDJSON_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(RAPIDJSON_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
     rapidjson
     GIT_REPOSITORY https://github.com/Tencent/rapidjson.git
