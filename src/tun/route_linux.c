@@ -203,10 +203,10 @@ static int dns_setup_resolvectl(const char *ifname,
     }
     /* Set catch-all domain routing */
     snprintf(cmd, sizeof(cmd), "resolvectl domain %s ~.", ifname);
-    system(cmd);
+    (void)system(cmd);
     /* Enable default-route */
     snprintf(cmd, sizeof(cmd), "resolvectl default-route %s true", ifname);
-    system(cmd);
+    (void)system(cmd);
     return 0;
 }
 
@@ -258,7 +258,7 @@ int usque_route_detect_physical_iface(char *buf, int buflen) {
         if (strncmp(ent->d_name, "br-", 3) == 0) continue;
 
         /* Check if interface is up */
-        char path[256];
+        char path[512];
         snprintf(path, sizeof(path), "/sys/class/net/%s/operstate", ent->d_name);
         FILE *fp = fopen(path, "r");
         if (!fp) continue;

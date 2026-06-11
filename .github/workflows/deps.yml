@@ -109,45 +109,6 @@ jobs:
       - name: Run tests
         run: ./build.sh test
 
-  windows-x86_64:
-    runs-on: windows-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup MSYS2
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          update: true
-          install: >-
-            base-devel
-            pkg-config
-            cmake
-            ninja
-            git
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-ninja
-            mingw-w64-x86_64-go
-            mingw-w64-x86_64-libev
-
-      - name: Fetch dependencies
-        shell: msys2 {0}
-        run: ./deps.sh fetch
-
-      - name: Build dependencies
-        shell: msys2 {0}
-        run: ./deps.sh build
-
-      - name: Build project
-        shell: msys2 {0}
-        run: ./build.sh build
-
-      - name: Run tests
-        shell: msys2 {0}
-        run: ./build.sh test
-
   lint:
     runs-on: ubuntu-latest
     steps:

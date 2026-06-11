@@ -43,12 +43,24 @@ else()
     target_sources(usque-a PRIVATE tun/tun_linux.c tun/route_linux.c)
 endif()
 
+# Find libev (Homebrew on macOS, libev-dev on Linux)
+find_path(LIBEV_INCLUDE_DIR ev.h
+    HINTS /opt/homebrew/include /usr/local/include
+)
+find_library(LIBEV_LIBRARY NAMES ev
+    HINTS /opt/homebrew/lib /usr/local/lib
+)
+if(NOT LIBEV_INCLUDE_DIR OR NOT LIBEV_LIBRARY)
+    message(FATAL_ERROR "libev not found. Install with: brew install libev (macOS) or apt install libev-dev (Linux)")
+endif()
+
 target_include_directories(usque-a
     PUBLIC
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${LIBEV_INCLUDE_DIR}
         ${BORINGSSL_DIR}/include
         ${NGTCP2_DIR}/lib/includes
         ${NGTCP2_DIR}/crypto/includes
@@ -64,7 +76,7 @@ target_link_libraries(usque-a PUBLIC
     ${NGHTTP3_DIR}/build/lib/libnghttp3.a
     ${BORINGSSL_DIR}/build/libssl.a
     ${BORINGSSL_DIR}/build/libcrypto.a
-    ev
+    ${LIBEV_LIBRARY}
     pthread
 )
 

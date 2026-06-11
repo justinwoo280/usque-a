@@ -163,76 +163,8 @@ jobs:
             usque-a-*.tar.gz
             usque-a-*.sha256
 
-  windows-x86_64:
-    runs-on: windows-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup MSYS2
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          update: true
-          install: >-
-            base-devel
-            pkg-config
-            cmake
-            ninja
-            git
-            unzip
-            upx
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-ninja
-            mingw-w64-x86_64-go
-            mingw-w64-x86_64-libev
-
-      - name: Fetch and build dependencies
-        shell: msys2 {0}
-        run: ./deps.sh all
-
-      - name: Build release binary
-        shell: msys2 {0}
-        run: ./build.sh release
-
-      - name: UPX compress
-        shell: msys2 {0}
-        run: |
-          BIN="build/src/usque-a-cli.exe"
-          STRIPPED="build/src/usque-a-cli.stripped"
-          if [ -f "$STRIPPED" ]; then BIN="$STRIPPED"; fi
-          echo "Before: $(du -h "$BIN" | cut -f1)"
-          upx --best --lzma "$BIN"
-          echo "After:  $(du -h "$BIN" | cut -f1)"
-
-      - name: Package artifact
-        shell: msys2 {0}
-        run: |
-          VER="${{ inputs.version }}"
-          NAME="usque-a-${VER}-windows-amd64"
-          mkdir -p "${NAME}"
-
-          BIN="build/src/usque-a-cli.stripped"
-          if [ ! -f "$BIN" ]; then BIN="build/src/usque-a-cli.exe"; fi
-          cp "$BIN" "${NAME}/usque-a-cli.exe"
-
-          curl -L -o /tmp/wintun.zip "https://www.wintun.net/builds/wintun-0.14.1.zip"
-          unzip -j /tmp/wintun.zip "wintun/bin/amd64/wintun.dll" -d "${NAME}/"
-
-          7z a "${NAME}.zip" "${NAME}"
-          sha256sum "${NAME}.zip" > "${NAME}.zip.sha256"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: usque-a-windows-amd64
-          path: |
-            usque-a-*.zip
-            usque-a-*.sha256
-
   publish:
-    needs: [linux-x86_64, linux-aarch64, macos-arm64, macos-x86_64, windows-x86_64]
+    needs: [linux-x86_64, linux-aarch64, macos-arm64, macos-x86_64]
     runs-on: ubuntu-latest
 
     steps:

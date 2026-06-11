@@ -7,6 +7,7 @@
 #include <sys/kern_control.h>
 #include <sys/sys_domain.h>
 #include <net/if.h>
+#include <net/if_utun.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
