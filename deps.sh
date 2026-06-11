@@ -31,7 +31,8 @@ check_tool() {
 
 # ---- Clone or update a dependency ----
 clone_or_update() {
-    local name="$1" repo="$2" commit="$3" dir="${DEPS_DIR}/${name}"
+    local name="$1" repo="$2" commit="$3"
+    local dir="${DEPS_DIR}/${name}"
 
     if [ -d "$dir/.git" ]; then
         info "${name}: updating..."
