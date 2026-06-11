@@ -17,11 +17,53 @@ permissions:
   contents: write
 
 jobs:
-  build-linux:
+  linux-x86_64:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        arch: [x86_64, aarch64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake g++ make git \
+            autoconf automake libtool pkg-config \
+            golang ninja-build libev-dev \
+            upx-ucl
+
+      - name: Fetch and build dependencies
+        run: ./deps.sh all
+
+      - name: Build release binary
+        run: ./build.sh release
+
+      - name: UPX compress
+        run: |
+          BIN="build/src/usque-a-cli.stripped"
+          echo "Before: $(du -h "$BIN" | cut -f1)"
+          upx --best --lzma "$BIN"
+          echo "After:  $(du -h "$BIN" | cut -f1)"
+
+      - name: Package artifact
+        run: |
+          VER="${{ inputs.version }}"
+          NAME="usque-a-${VER}-linux-amd64"
+          mkdir -p "${NAME}"
+          cp build/src/usque-a-cli.stripped "${NAME}/usque-a-cli"
+          tar czf "${NAME}.tar.gz" "${NAME}"
+          sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: usque-a-linux-amd64
+          path: |
+            usque-a-*.tar.gz
+            usque-a-*.sha256
+
+  linux-aarch64:
+    runs-on: ubuntu-24.04-arm
 
     steps:
       - uses: actions/checkout@v4
@@ -42,35 +84,29 @@ jobs:
 
       - name: Package artifact
         run: |
-          ARCH="${{ matrix.arch }}"
           VER="${{ inputs.version }}"
-          NAME="usque-a-${VER}-linux-${ARCH}"
+          NAME="usque-a-${VER}-linux-arm64"
           mkdir -p "${NAME}"
           cp build/src/usque-a-cli.stripped "${NAME}/usque-a-cli"
-          cp README.md "${NAME}/" 2>/dev/null || true
           tar czf "${NAME}.tar.gz" "${NAME}"
           sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: usque-a-linux-${{ matrix.arch }}
+          name: usque-a-linux-arm64
           path: |
             usque-a-*.tar.gz
             usque-a-*.sha256
 
-  build-macos:
+  macos-arm64:
     runs-on: macos-latest
-    strategy:
-      matrix:
-        arch: [x86_64, arm64]
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: |
-          brew install cmake autoconf automake libtool pkg-config go ninja libev
+        run: brew install cmake autoconf automake libtool pkg-config go ninja libev
 
       - name: Fetch and build dependencies
         run: ./deps.sh all
@@ -80,65 +116,126 @@ jobs:
 
       - name: Package artifact
         run: |
-          ARCH="${{ matrix.arch }}"
           VER="${{ inputs.version }}"
-          NAME="usque-a-${VER}-darwin-${ARCH}"
+          NAME="usque-a-${VER}-darwin-arm64"
           mkdir -p "${NAME}"
           cp build/src/usque-a-cli.stripped "${NAME}/usque-a-cli"
-          cp README.md "${NAME}/" 2>/dev/null || true
           tar czf "${NAME}.tar.gz" "${NAME}"
-          sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
+          shasum -a 256 "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: usque-a-darwin-${{ matrix.arch }}
+          name: usque-a-darwin-arm64
           path: |
             usque-a-*.tar.gz
             usque-a-*.sha256
 
-  build-windows:
+  macos-x86_64:
+    runs-on: macos-13
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install cmake autoconf automake libtool pkg-config go ninja libev
+
+      - name: Fetch and build dependencies
+        run: ./deps.sh all
+
+      - name: Build release binary
+        run: ./build.sh release
+
+      - name: Package artifact
+        run: |
+          VER="${{ inputs.version }}"
+          NAME="usque-a-${VER}-darwin-amd64"
+          mkdir -p "${NAME}"
+          cp build/src/usque-a-cli.stripped "${NAME}/usque-a-cli"
+          tar czf "${NAME}.tar.gz" "${NAME}"
+          shasum -a 256 "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: usque-a-darwin-amd64
+          path: |
+            usque-a-*.tar.gz
+            usque-a-*.sha256
+
+  windows-x86_64:
     runs-on: windows-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: |
-          choco install cmake make ninja golang autoconf automake libtool pkgconfig -y
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            base-devel
+            autoconf
+            automake
+            libtool
+            pkg-config
+            cmake
+            ninja
+            git
+            unzip
+            upx
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-go
+            mingw-w64-x86_64-libev
 
       - name: Fetch and build dependencies
-        shell: bash
+        shell: msys2 {0}
         run: ./deps.sh all
 
       - name: Build release binary
-        shell: bash
+        shell: msys2 {0}
         run: ./build.sh release
 
+      - name: UPX compress
+        shell: msys2 {0}
+        run: |
+          BIN="build/src/usque-a-cli.exe"
+          STRIPPED="build/src/usque-a-cli.stripped"
+          if [ -f "$STRIPPED" ]; then BIN="$STRIPPED"; fi
+          echo "Before: $(du -h "$BIN" | cut -f1)"
+          upx --best --lzma "$BIN"
+          echo "After:  $(du -h "$BIN" | cut -f1)"
+
       - name: Package artifact
-        shell: bash
+        shell: msys2 {0}
         run: |
           VER="${{ inputs.version }}"
-          NAME="usque-a-${VER}-windows-x86_64"
+          NAME="usque-a-${VER}-windows-amd64"
           mkdir -p "${NAME}"
-          cp build/src/usque-a-cli.exe "${NAME}/usque-a-cli.exe"
-          cp README.md "${NAME}/" 2>/dev/null || true
-          # Download wintun.dll
-          curl -L -o "${NAME}/wintun.dll" \
-            "https://www.wintun.net/builds/wintun-0.14.1.zip" 2>/dev/null || true
+
+          BIN="build/src/usque-a-cli.stripped"
+          if [ ! -f "$BIN" ]; then BIN="build/src/usque-a-cli.exe"; fi
+          cp "$BIN" "${NAME}/usque-a-cli.exe"
+
+          curl -L -o /tmp/wintun.zip "https://www.wintun.net/builds/wintun-0.14.1.zip"
+          unzip -j /tmp/wintun.zip "wintun/bin/amd64/wintun.dll" -d "${NAME}/"
+
           7z a "${NAME}.zip" "${NAME}"
-          certutil -hashfile "${NAME}.zip" SHA256 > "${NAME}.zip.sha256"
+          sha256sum "${NAME}.zip" > "${NAME}.zip.sha256"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: usque-a-windows-x86_64
+          name: usque-a-windows-amd64
           path: |
             usque-a-*.zip
             usque-a-*.sha256
 
   publish:
-    needs: [build-linux, build-macos, build-windows]
+    needs: [linux-x86_64, linux-aarch64, macos-arm64, macos-x86_64, windows-x86_64]
     runs-on: ubuntu-latest
 
     steps:

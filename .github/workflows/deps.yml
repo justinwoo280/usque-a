@@ -7,7 +7,7 @@ on:
     branches: [main, master]
 
 jobs:
-  build-linux:
+  linux-x86_64:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -40,16 +40,20 @@ jobs:
       - name: Show dependency status
         run: ./deps.sh status
 
-  build-macos:
-    runs-on: macos-latest
-    if: github.event_name == 'push'  # Only on push, not PR (to save CI minutes)
+  linux-aarch64:
+    runs-on: ubuntu-24.04-arm
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Install system dependencies
         run: |
-          brew install cmake autoconf automake libtool pkg-config go ninja libev
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake g++ make git \
+            autoconf automake libtool pkg-config \
+            golang ninja-build \
+            libev-dev
 
       - name: Fetch dependencies
         run: ./deps.sh fetch
@@ -61,6 +65,90 @@ jobs:
         run: ./build.sh build
 
       - name: Run tests
+        run: ./build.sh test
+
+  macos-arm64:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: brew install cmake autoconf automake libtool pkg-config go ninja libev
+
+      - name: Fetch dependencies
+        run: ./deps.sh fetch
+
+      - name: Build dependencies
+        run: ./deps.sh build
+
+      - name: Build project
+        run: ./build.sh build
+
+      - name: Run tests
+        run: ./build.sh test
+
+  macos-x86_64:
+    runs-on: macos-13
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: brew install cmake autoconf automake libtool pkg-config go ninja libev
+
+      - name: Fetch dependencies
+        run: ./deps.sh fetch
+
+      - name: Build dependencies
+        run: ./deps.sh build
+
+      - name: Build project
+        run: ./build.sh build
+
+      - name: Run tests
+        run: ./build.sh test
+
+  windows-x86_64:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            base-devel
+            autoconf
+            automake
+            libtool
+            pkg-config
+            cmake
+            ninja
+            git
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-go
+            mingw-w64-x86_64-libev
+
+      - name: Fetch dependencies
+        shell: msys2 {0}
+        run: ./deps.sh fetch
+
+      - name: Build dependencies
+        shell: msys2 {0}
+        run: ./deps.sh build
+
+      - name: Build project
+        shell: msys2 {0}
+        run: ./build.sh build
+
+      - name: Run tests
+        shell: msys2 {0}
         run: ./build.sh test
 
   lint:
@@ -77,4 +165,4 @@ jobs:
       - name: Check CMake syntax
         run: |
           sudo apt-get install -y cmake
-          cmake -P CMakeLists.txt 2>&1 || true  # syntax check only
+          cmake -P CMakeLists.txt 2>&1 || true
