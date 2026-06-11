@@ -14,7 +14,7 @@ NGTCP2_REPO="https://github.com/ngtcp2/ngtcp2"
 NGTCP2_COMMIT="9496b2da0d968f0ab1d5da689effe4d28eb6ead4"
 
 NGHTTP3_REPO="https://github.com/justinwoo280/nghttp3"
-NGHTTP3_COMMIT="e45c58399647c7c5b9676d804eb1f0ef2bb0cc25"
+NGHTTP3_REF="origin/main"
 
 # ---- Helpers ----
 info()  { echo -e "\033[1;34m[deps]\033[0m $*"; }
@@ -133,7 +133,7 @@ cmd_fetch() {
     info "Fetching all dependencies..."
     clone_or_update "boringssl" "$BORINGSSL_REPO" "$BORINGSSL_COMMIT"
     clone_or_update "ngtcp2"    "$NGTCP2_REPO"    "$NGTCP2_COMMIT"
-    clone_or_update "nghttp3"   "$NGHTTP3_REPO"   "$NGHTTP3_COMMIT"
+    clone_or_update "nghttp3"   "$NGHTTP3_REPO"   "$NGHTTP3_REF"
     ok "All dependencies fetched"
 }
 
@@ -205,7 +205,7 @@ Commands:
 Pinned versions:
   BoringSSL  ${BORINGSSL_COMMIT:0:12}  ${BORINGSSL_REPO}
   ngtcp2     ${NGTCP2_COMMIT:0:12}  ${NGTCP2_REPO}
-  nghttp3    ${NGHTTP3_COMMIT:0:12}  ${NGHTTP3_REPO} (fork)
+  nghttp3    ${NGHTTP3_REF}          ${NGHTTP3_REPO} (fork)
 EOF
 }
 
