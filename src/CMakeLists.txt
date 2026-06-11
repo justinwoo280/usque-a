@@ -52,13 +52,15 @@ target_include_directories(usque-a
         ${BORINGSSL_DIR}/include
         ${NGTCP2_DIR}/lib/includes
         ${NGTCP2_DIR}/crypto/includes
-        ${NGHTTP3_DIR}/build/include
+        ${NGTCP2_DIR}/build/lib/includes
+        ${NGHTTP3_DIR}/lib/includes
+        ${NGHTTP3_DIR}/build/lib/includes
 )
 
 target_link_libraries(usque-a PUBLIC
     rapidjson
-    ${NGTCP2_DIR}/lib/.libs/libngtcp2.a
-    ${NGTCP2_DIR}/crypto/boringssl/libngtcp2_crypto_boringssl.a
+    ${NGTCP2_DIR}/build/lib/libngtcp2.a
+    ${NGTCP2_DIR}/build/crypto/boringssl/libngtcp2_crypto_boringssl.a
     ${NGHTTP3_DIR}/build/lib/libnghttp3.a
     ${BORINGSSL_DIR}/build/libssl.a
     ${BORINGSSL_DIR}/build/libcrypto.a

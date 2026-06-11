@@ -17,8 +17,8 @@ check_deps() {
         "boringssl/build/libssl.a" \
         "boringssl/build/libcrypto.a" \
         "nghttp3/build/lib/libnghttp3.a" \
-        "ngtcp2/lib/.libs/libngtcp2.a" \
-        "ngtcp2/crypto/boringssl/libngtcp2_crypto_boringssl.a"; do
+        "ngtcp2/build/lib/libngtcp2.a" \
+        "ngtcp2/build/crypto/boringssl/libngtcp2_crypto_boringssl.a"; do
         if [ ! -f "${DEPS_DIR}/${f}" ]; then
             err "Missing: ${DEPS_DIR}/${f}"
             missing=1

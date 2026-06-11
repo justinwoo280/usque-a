@@ -45,6 +45,11 @@ clone_or_update() {
 
     info "${name}: checking out ${commit:0:12}..."
     git -C "$dir" checkout --quiet "$commit"
+
+    if [ -f "$dir/.gitmodules" ]; then
+        info "${name}: initializing submodules..."
+        git -C "$dir" submodule update --init --quiet
+    fi
 }
 
 # ---- Build BoringSSL ----
@@ -79,21 +84,19 @@ build_nghttp3() {
         return
     fi
 
-    check_tool autoreconf autoconf
-    check_tool automake automake
-    check_tool libtool libtool
-    check_tool pkg-config pkg-config
-
-    info "nghttp3: autoreconf..."
-    cd "$dir"
-    autoreconf -fi
+    check_tool cmake cmake
 
     info "nghttp3: configuring..."
-    ./configure --prefix="${dir}/build" --enable-lib-only
+    cmake -B "${dir}/build" -S "${dir}" \
+        -DENABLE_SHARED_LIB=OFF \
+        -DENABLE_STATIC_LIB=ON \
+        -DENABLE_LIB_ONLY=ON \
+        -DBUILD_TESTING=OFF \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
 
     info "nghttp3: building..."
-    make -j"$(nproc)"
-    make install
+    cmake --build "${dir}/build" -j"$(nproc)"
 
     ok "nghttp3: built"
 }
@@ -102,29 +105,30 @@ build_nghttp3() {
 build_ngtcp2() {
     local dir="${DEPS_DIR}/ngtcp2"
     local bssl_dir="${DEPS_DIR}/boringssl"
-    local nh3_dir="${DEPS_DIR}/nghttp3"
 
-    if [ -f "${dir}/lib/.libs/libngtcp2.a" ] && \
-       [ -f "${dir}/crypto/boringssl/libngtcp2_crypto_boringssl.a" ]; then
+    if [ -f "${dir}/build/lib/libngtcp2.a" ] && \
+       [ -f "${dir}/build/crypto/boringssl/libngtcp2_crypto_boringssl.a" ]; then
         ok "ngtcp2: already built"
         return
     fi
 
-    check_tool autoreconf autoconf
-
-    info "ngtcp2: autoreconf..."
-    cd "$dir"
-    autoreconf -fi
+    check_tool cmake cmake
 
     info "ngtcp2: configuring with BoringSSL..."
-    ./configure \
-        PKG_CONFIG_PATH="${nh3_dir}/build/lib/pkgconfig" \
-        BORINGSSL_LIBS="-L${bssl_dir}/build -lssl -lcrypto" \
-        BORINGSSL_CFLAGS="-I${bssl_dir}/include" \
-        --with-boringssl
+    cmake -B "${dir}/build" -S "${dir}" \
+        -DENABLE_SHARED_LIB=OFF \
+        -DENABLE_STATIC_LIB=ON \
+        -DENABLE_LIB_ONLY=ON \
+        -DENABLE_OPENSSL=OFF \
+        -DENABLE_BORINGSSL=ON \
+        -DBORINGSSL_INCLUDE_DIR="${bssl_dir}/include" \
+        -DBORINGSSL_LIBRARIES="${bssl_dir}/build/libssl.a;${bssl_dir}/build/libcrypto.a" \
+        -DBUILD_TESTING=OFF \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
 
     info "ngtcp2: building..."
-    make -j"$(nproc)"
+    cmake --build "${dir}/build" -j"$(nproc)"
 
     ok "ngtcp2: built"
 }
@@ -171,8 +175,8 @@ cmd_status() {
         "boringssl/build/libssl.a" \
         "boringssl/build/libcrypto.a" \
         "nghttp3/build/lib/libnghttp3.a" \
-        "ngtcp2/lib/.libs/libngtcp2.a" \
-        "ngtcp2/crypto/boringssl/libngtcp2_crypto_boringssl.a"; do
+        "ngtcp2/build/lib/libngtcp2.a" \
+        "ngtcp2/build/crypto/boringssl/libngtcp2_crypto_boringssl.a"; do
         if [ -f "${DEPS_DIR}/${f}" ]; then
             printf "  \033[32m✓\033[0m %s\n" "$f"
         else
@@ -185,7 +189,7 @@ cmd_clean() {
     info "Cleaning build artifacts..."
     rm -rf "${DEPS_DIR}/boringssl/build"
     rm -rf "${DEPS_DIR}/nghttp3/build"
-    cd "${DEPS_DIR}/ngtcp2" 2>/dev/null && make distclean 2>/dev/null || true
+    rm -rf "${DEPS_DIR}/ngtcp2/build"
     ok "Cleaned"
 }
 
