@@ -1,0 +1,80 @@
+name: Deps Build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        build_type: [Release, Debug]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake g++ make git \
+            autoconf automake libtool pkg-config \
+            golang ninja-build \
+            libev-dev
+
+      - name: Fetch dependencies
+        run: ./deps.sh fetch
+
+      - name: Build dependencies
+        run: ./deps.sh build
+
+      - name: Build project
+        run: BUILD_TYPE=${{ matrix.build_type }} ./build.sh build
+
+      - name: Run tests
+        run: ./build.sh test
+
+      - name: Show dependency status
+        run: ./deps.sh status
+
+  build-macos:
+    runs-on: macos-latest
+    if: github.event_name == 'push'  # Only on push, not PR (to save CI minutes)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          brew install cmake autoconf automake libtool pkg-config go ninja libev
+
+      - name: Fetch dependencies
+        run: ./deps.sh fetch
+
+      - name: Build dependencies
+        run: ./deps.sh build
+
+      - name: Build project
+        run: ./build.sh build
+
+      - name: Run tests
+        run: ./build.sh test
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check shell scripts
+        run: |
+          bash -n deps.sh
+          bash -n build.sh
+          echo "Shell scripts OK"
+
+      - name: Check CMake syntax
+        run: |
+          sudo apt-get install -y cmake
+          cmake -P CMakeLists.txt 2>&1 || true  # syntax check only

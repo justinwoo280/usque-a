@@ -1,0 +1,65 @@
+{
+  "account": {
+    "private_key": "MHcCAQEEIBmSNMJO6YE+Xa7gBqNY3GlhJTF4FLDjMa6FBjIF7Q5OoAoGCCqGSM49AwEHoUQDQgAEYBkOYR0wOdaSTgNjGEPp5bDOyV/OHk0wFw==",
+    "endpoint_v4": "162.159.198.1",
+    "endpoint_v6": "2606:4700:103::",
+    "endpoint_h2_v4": "162.159.198.2",
+    "endpoint_h2_v6": "",
+    "endpoint_pub_key": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE4BkOYR0wOdaSTgNjGEPp5bDOyV/O\nHk0wFw==\n-----END PUBLIC KEY-----\n",
+    "license": "test-license-key",
+    "id": "abc-def-123-456",
+    "access_token": "bearer-token-xyz",
+    "ipv4": "100.96.0.3",
+    "ipv6": "2606:4700:103::1234"
+  },
+  "inbound": {
+    "type": "tun",
+    "settings": {
+      "name": "usque0",
+      "mtu": 1280,
+      "ipv4": true,
+      "ipv6": true,
+      "persist": false,
+      "tun_fd": 0,
+      "auto_route": true,
+      "dns": ["1.1.1.1", "2606:4700:4700::1111"]
+    }
+  },
+  "outbound": {
+    "tag": "warp",
+    "settings": {
+      "port": 443,
+      "use_ipv6": false,
+      "use_http2": false,
+      "sni_address": "consumer-masque.cloudflareclient.com",
+      "keepalive_period": "30s",
+      "initial_packet_size": 1242,
+      "reconnect_delay": "1s",
+      "always_reconnect": false,
+      "insecure": false,
+      "on_connect": "",
+      "on_disconnect": "",
+      "congestion": {
+        "type": "bbr",
+        "brutal_bps": 0,
+        "bbr_profile": "standard"
+      },
+      "noise": {
+        "enabled": true,
+        "count": 5,
+        "min_size": 100,
+        "max_size": 400,
+        "delay_min": "10ms",
+        "delay_max": "50ms"
+      },
+      "pre_noise": {
+        "enabled": true,
+        "count": 3,
+        "min_size": 64,
+        "max_size": 128,
+        "delay_min": "5ms",
+        "delay_max": "15ms"
+      }
+    }
+  }
+}

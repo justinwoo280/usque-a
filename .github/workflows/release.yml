@@ -1,0 +1,168 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 0.2.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake g++ make git \
+            autoconf automake libtool pkg-config \
+            golang ninja-build libev-dev
+
+      - name: Fetch and build dependencies
+        run: ./deps.sh all
+
+      - name: Build release binary
+        run: ./build.sh release
+
+      - name: Package artifact
+        run: |
+          ARCH="${{ matrix.arch }}"
+          VER="${{ inputs.version }}"
+          NAME="usque-a-${VER}-linux-${ARCH}"
+          mkdir -p "${NAME}"
+          cp build/src/usque-a-cli.stripped "${NAME}/usque-a-cli"
+          cp README.md "${NAME}/" 2>/dev/null || true
+          tar czf "${NAME}.tar.gz" "${NAME}"
+          sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: usque-a-linux-${{ matrix.arch }}
+          path: |
+            usque-a-*.tar.gz
+            usque-a-*.sha256
+
+  build-macos:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        arch: [x86_64, arm64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install cmake autoconf automake libtool pkg-config go ninja libev
+
+      - name: Fetch and build dependencies
+        run: ./deps.sh all
+
+      - name: Build release binary
+        run: ./build.sh release
+
+      - name: Package artifact
+        run: |
+          ARCH="${{ matrix.arch }}"
+          VER="${{ inputs.version }}"
+          NAME="usque-a-${VER}-darwin-${ARCH}"
+          mkdir -p "${NAME}"
+          cp build/src/usque-a-cli.stripped "${NAME}/usque-a-cli"
+          cp README.md "${NAME}/" 2>/dev/null || true
+          tar czf "${NAME}.tar.gz" "${NAME}"
+          sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: usque-a-darwin-${{ matrix.arch }}
+          path: |
+            usque-a-*.tar.gz
+            usque-a-*.sha256
+
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          choco install cmake make ninja golang autoconf automake libtool pkgconfig -y
+
+      - name: Fetch and build dependencies
+        shell: bash
+        run: ./deps.sh all
+
+      - name: Build release binary
+        shell: bash
+        run: ./build.sh release
+
+      - name: Package artifact
+        shell: bash
+        run: |
+          VER="${{ inputs.version }}"
+          NAME="usque-a-${VER}-windows-x86_64"
+          mkdir -p "${NAME}"
+          cp build/src/usque-a-cli.exe "${NAME}/usque-a-cli.exe"
+          cp README.md "${NAME}/" 2>/dev/null || true
+          # Download wintun.dll
+          curl -L -o "${NAME}/wintun.dll" \
+            "https://www.wintun.net/builds/wintun-0.14.1.zip" 2>/dev/null || true
+          7z a "${NAME}.zip" "${NAME}"
+          certutil -hashfile "${NAME}.zip" SHA256 > "${NAME}.zip.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: usque-a-windows-x86_64
+          path: |
+            usque-a-*.zip
+            usque-a-*.sha256
+
+  publish:
+    needs: [build-linux, build-macos, build-windows]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lhR artifacts/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          name: usque-a v${{ inputs.version }}
+          prerelease: ${{ inputs.prerelease }}
+          generate_release_notes: true
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
+            artifacts/*.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

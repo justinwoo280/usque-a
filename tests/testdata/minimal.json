@@ -1,0 +1,11 @@
+{
+  "account": {
+    "private_key": "MHcCAQEEIBmSNMJO6YE+Xa7gBqNY3GlhJTF4FLDjMa6FBjIF7Q5OoAoGCCqGSM49AwEHoUQDQgAEYBkOYR0wOdaSTgNjGEPp5bDOyV/OHk0wFw=="
+  },
+  "inbound": {
+    "type": "tun"
+  },
+  "outbound": {
+    "settings": {}
+  }
+}
