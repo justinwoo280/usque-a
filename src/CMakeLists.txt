@@ -54,19 +54,19 @@ if(NOT LIBEV_INCLUDE_DIR OR NOT LIBEV_LIBRARY)
     message(FATAL_ERROR "libev not found. Install with: brew install libev (macOS) or apt install libev-dev (Linux)")
 endif()
 
-target_include_directories(usque-a
+target_include_directories(usque-a BEFORE
     PUBLIC
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
-        ${LIBEV_INCLUDE_DIR}
         ${BORINGSSL_DIR}/include
         ${NGTCP2_DIR}/lib/includes
         ${NGTCP2_DIR}/crypto/includes
         ${NGTCP2_DIR}/build/lib/includes
         ${NGHTTP3_DIR}/lib/includes
         ${NGHTTP3_DIR}/build/lib/includes
+        ${LIBEV_INCLUDE_DIR}
 )
 
 target_link_libraries(usque-a PUBLIC

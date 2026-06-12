@@ -131,40 +131,8 @@ jobs:
             usque-a-*.tar.gz
             usque-a-*.sha256
 
-  macos-x86_64:
-    runs-on: macos-13
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: brew install cmake pkg-config go ninja libev
-
-      - name: Fetch and build dependencies
-        run: ./deps.sh all
-
-      - name: Build release binary
-        run: ./build.sh release
-
-      - name: Package artifact
-        run: |
-          VER="${{ inputs.version }}"
-          NAME="usque-a-${VER}-darwin-amd64"
-          mkdir -p "${NAME}"
-          cp build/src/usque-a-cli.stripped "${NAME}/usque-a-cli"
-          tar czf "${NAME}.tar.gz" "${NAME}"
-          shasum -a 256 "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: usque-a-darwin-amd64
-          path: |
-            usque-a-*.tar.gz
-            usque-a-*.sha256
-
   publish:
-    needs: [linux-x86_64, linux-aarch64, macos-arm64, macos-x86_64]
+    needs: [linux-x86_64, linux-aarch64, macos-arm64]
     runs-on: ubuntu-latest
 
     steps:

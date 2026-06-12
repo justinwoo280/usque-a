@@ -88,27 +88,6 @@ jobs:
       - name: Run tests
         run: ./build.sh test
 
-  macos-x86_64:
-    runs-on: macos-13
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install system dependencies
-        run: brew install cmake pkg-config go ninja libev
-
-      - name: Fetch dependencies
-        run: ./deps.sh fetch
-
-      - name: Build dependencies
-        run: ./deps.sh build
-
-      - name: Build project
-        run: ./build.sh build
-
-      - name: Run tests
-        run: ./build.sh test
-
   lint:
     runs-on: ubuntu-latest
     steps:
