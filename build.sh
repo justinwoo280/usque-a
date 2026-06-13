@@ -76,11 +76,18 @@ cmd_build() {
     info "Build type: ${build_type}"
     info "Parallel jobs: ${jobs}"
 
+    # Use Ninja generator (cross-platform, supports -j; MSBuild does not)
+    local gen_flag=""
+    if command -v ninja &>/dev/null; then
+        gen_flag="-GNinja"
+    fi
+
     cmake -B "${BUILD_DIR}" -S "${SCRIPT_DIR}" \
+        ${gen_flag} \
         -DBUILD_SHARED_LIBS="${shared_libs}" \
         -DCMAKE_BUILD_TYPE="${build_type}"
 
-    cmake --build "${BUILD_DIR}" -- -j"${jobs}"
+    cmake --build "${BUILD_DIR}" -j"${jobs}"
 
     ok "Build complete: ${BUILD_DIR}/src/usque-a-cli"
 }

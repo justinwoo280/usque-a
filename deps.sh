@@ -129,7 +129,8 @@ build_boringssl() {
     cmake -B "${dir}/build" -S "${dir}" \
         $(cmake_gen) \
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_BUILD_TYPE=Release \
+        $(suppress_warnings_flag)
 
     info "BoringSSL: building (this takes a while)..."
     cmake --build "${dir}/build" -j"$(get_nproc)" --target ssl crypto
@@ -156,7 +157,8 @@ build_nghttp3() {
         -DENABLE_LIB_ONLY=ON \
         -DBUILD_TESTING=OFF \
         -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        $(suppress_warnings_flag)
 
     info "nghttp3: building..."
     cmake --build "${dir}/build" -j"$(get_nproc)"
@@ -206,7 +208,8 @@ build_ngtcp2() {
         -DBORINGSSL_LIBRARIES="${ssl_lib_w};${crypto_lib_w}" \
         -DBUILD_TESTING=OFF \
         -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        $(suppress_warnings_flag)
 
     info "ngtcp2: building..."
     cmake --build "${dir}/build" -j"$(get_nproc)"
@@ -215,6 +218,15 @@ build_ngtcp2() {
 }
 
 # ---- Build libuv ----
+# Compiler warning suppression for third-party dependency builds
+suppress_warnings_flag() {
+    if is_windows; then
+        echo "-DCMAKE_C_FLAGS=/W0 -DCMAKE_CXX_FLAGS=/W0"
+    else
+        echo "-DCMAKE_C_FLAGS=-w -DCMAKE_CXX_FLAGS=-w"
+    fi
+}
+
 build_libuv() {
     local dir="${DEPS_DIR}/libuv"
     if find_static_lib "${dir}/build" "libuv_a" &>/dev/null || \
@@ -232,7 +244,8 @@ build_libuv() {
         -DBUILD_SHARED_LIBS=OFF \
         -DLIBUV_BUILD_TESTS=OFF \
         -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        $(suppress_warnings_flag)
 
     info "libuv: building..."
     cmake --build "${dir}/build" -j"$(get_nproc)"
