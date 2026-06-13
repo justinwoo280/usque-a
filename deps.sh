@@ -219,12 +219,10 @@ build_ngtcp2() {
 
 # ---- Build libuv ----
 # Compiler warning suppression for third-party dependency builds
+# Use -w on all platforms — CMake passes it through to both GCC and MSVC.
+# Do NOT use /W0 on Windows: MSYS2 bash converts /W0 to C:/Program Files/Git/W0.
 suppress_warnings_flag() {
-    if is_windows; then
-        echo "-DCMAKE_C_FLAGS=/W0 -DCMAKE_CXX_FLAGS=/W0"
-    else
-        echo "-DCMAKE_C_FLAGS=-w -DCMAKE_CXX_FLAGS=-w"
-    fi
+    echo "-DCMAKE_C_FLAGS=-w -DCMAKE_CXX_FLAGS=-w"
 }
 
 build_libuv() {
