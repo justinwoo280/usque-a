@@ -48,6 +48,23 @@ cmake_gen() {
     fi
 }
 
+# Convert MSYS path to Windows-native path (D:/a/... instead of /d/a/...)
+to_winpath() {
+    if is_windows && command -v cygpath &>/dev/null; then
+        cygpath -w "$1"
+    elif is_windows; then
+        # Manual conversion: /d/foo → D:/foo
+        local p="$1"
+        if [[ "$p" =~ ^/([a-zA-Z])/(.*) ]]; then
+            echo "${BASH_REMATCH[1]^^}:/${BASH_REMATCH[2]}"
+        else
+            echo "$p"
+        fi
+    else
+        echo "$1"
+    fi
+}
+
 check_tool() {
     if ! command -v "$1" &>/dev/null; then
         err "Required tool not found: $1"
@@ -168,9 +185,16 @@ build_ngtcp2() {
     crypto_lib=$(find_static_lib "${bssl_dir}/build" "libcrypto" 2>/dev/null || \
                  find_static_lib "${bssl_dir}/build" "crypto")
 
+    # Convert paths for MSVC compatibility
+    local bssl_inc ssl_lib_w crypto_lib_w
+    bssl_inc="$(to_winpath "${bssl_dir}/include")"
+    ssl_lib_w="$(to_winpath "${ssl_lib}")"
+    crypto_lib_w="$(to_winpath "${crypto_lib}")"
+
     info "ngtcp2: configuring with BoringSSL..."
-    info "ngtcp2: ssl_lib=${ssl_lib}"
-    info "ngtcp2: crypto_lib=${crypto_lib}"
+    info "ngtcp2: include=${bssl_inc}"
+    info "ngtcp2: ssl_lib=${ssl_lib_w}"
+    info "ngtcp2: crypto_lib=${crypto_lib_w}"
 
     cmake -B "${dir}/build" -S "${dir}" \
         $(cmake_gen) \
@@ -179,8 +203,8 @@ build_ngtcp2() {
         -DENABLE_LIB_ONLY=ON \
         -DENABLE_OPENSSL=OFF \
         -DENABLE_BORINGSSL=ON \
-        -DBORINGSSL_INCLUDE_DIR="${bssl_dir}/include" \
-        -DBORINGSSL_LIBRARIES="${ssl_lib};${crypto_lib}" \
+        -DBORINGSSL_INCLUDE_DIR="${bssl_inc}" \
+        -DBORINGSSL_LIBRARIES="${ssl_lib_w};${crypto_lib_w}" \
         -DBUILD_TESTING=OFF \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON
