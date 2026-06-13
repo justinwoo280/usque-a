@@ -43,15 +43,19 @@ else()
     target_sources(usque-a PRIVATE tun/tun_linux.c tun/route_linux.c)
 endif()
 
-# Find libev (Homebrew on macOS, libev-dev on Linux)
-find_path(LIBEV_INCLUDE_DIR ev.h
-    HINTS /opt/homebrew/include /usr/local/include
-)
-find_library(LIBEV_LIBRARY NAMES ev
-    HINTS /opt/homebrew/lib /usr/local/lib
-)
-if(NOT LIBEV_INCLUDE_DIR OR NOT LIBEV_LIBRARY)
-    message(FATAL_ERROR "libev not found. Install with: brew install libev (macOS) or apt install libev-dev (Linux)")
+# Find libuv (built from deps or sibling directory)
+if(EXISTS "${CMAKE_SOURCE_DIR}/deps/libuv/build/libuv_a.a")
+    set(LIBUV_DIR "${CMAKE_SOURCE_DIR}/deps/libuv")
+elseif(EXISTS "${CMAKE_SOURCE_DIR}/../libuv/build/libuv_a.a")
+    set(LIBUV_DIR "${CMAKE_SOURCE_DIR}/../libuv")
+else()
+    # Try system libuv as fallback
+    find_path(LIBUV_INCLUDE_DIR uv.h HINTS /opt/homebrew/include /usr/local/include /usr/include)
+    find_library(LIBUV_LIBRARY NAMES uv_a uv HINTS /opt/homebrew/lib /usr/local/lib /usr/lib)
+    if(NOT LIBUV_INCLUDE_DIR OR NOT LIBUV_LIBRARY)
+        message(FATAL_ERROR "libuv not found. Run ./deps.sh all or install libuv-dev")
+    endif()
+    set(LIBUV_USE_SYSTEM TRUE)
 endif()
 
 target_include_directories(usque-a BEFORE
@@ -66,8 +70,13 @@ target_include_directories(usque-a BEFORE
         ${NGTCP2_DIR}/build/lib/includes
         ${NGHTTP3_DIR}/lib/includes
         ${NGHTTP3_DIR}/build/lib/includes
-        ${LIBEV_INCLUDE_DIR}
 )
+
+if(LIBUV_USE_SYSTEM)
+    target_include_directories(usque-a PRIVATE ${LIBUV_INCLUDE_DIR})
+else()
+    target_include_directories(usque-a BEFORE PRIVATE ${LIBUV_DIR}/include)
+endif()
 
 target_link_libraries(usque-a PUBLIC
     rapidjson
@@ -76,9 +85,23 @@ target_link_libraries(usque-a PUBLIC
     ${NGHTTP3_DIR}/build/lib/libnghttp3.a
     ${BORINGSSL_DIR}/build/libssl.a
     ${BORINGSSL_DIR}/build/libcrypto.a
-    ${LIBEV_LIBRARY}
     pthread
 )
+
+if(LIBUV_USE_SYSTEM)
+    target_link_libraries(usque-a PUBLIC ${LIBUV_LIBRARY})
+else()
+    target_link_libraries(usque-a PUBLIC ${LIBUV_DIR}/build/libuv_a.a)
+endif()
+
+# Platform-specific libraries for libuv
+if(WIN32)
+    target_link_libraries(usque-a PUBLIC ws2_32 psapi iphlpapi userenv)
+elseif(APPLE)
+    find_library(COREFOUNDATION CoreFoundation)
+    find_library(SECURITY Security)
+    target_link_libraries(usque-a PUBLIC ${COREFOUNDATION} ${SECURITY})
+endif()
 
 set_target_properties(usque-a PROPERTIES
     C_VISIBILITY_PRESET hidden

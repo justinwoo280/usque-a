@@ -16,6 +16,9 @@ NGTCP2_COMMIT="9496b2da0d968f0ab1d5da689effe4d28eb6ead4"
 NGHTTP3_REPO="https://github.com/justinwoo280/nghttp3"
 NGHTTP3_REF="origin/main"
 
+LIBUV_REPO="https://github.com/libuv/libuv"
+LIBUV_TAG="v1.49.2"
+
 # ---- Helpers ----
 info()  { echo -e "\033[1;34m[deps]\033[0m $*"; }
 ok()    { echo -e "\033[1;32m[deps]\033[0m $*"; }
@@ -133,12 +136,36 @@ build_ngtcp2() {
     ok "ngtcp2: built"
 }
 
+# ---- Build libuv ----
+build_libuv() {
+    local dir="${DEPS_DIR}/libuv"
+    if [ -f "${dir}/build/libuv.a" ] || [ -f "${dir}/build/libuv_a.a" ]; then
+        ok "libuv: already built"
+        return
+    fi
+
+    check_tool cmake cmake
+
+    info "libuv: configuring..."
+    cmake -B "${dir}/build" -S "${dir}" \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DLIBUV_BUILD_TESTS=OFF \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+
+    info "libuv: building..."
+    cmake --build "${dir}/build" -j"$(nproc)"
+
+    ok "libuv: built"
+}
+
 # ---- Main commands ----
 cmd_fetch() {
     info "Fetching all dependencies..."
     clone_or_update "boringssl" "$BORINGSSL_REPO" "$BORINGSSL_COMMIT"
     clone_or_update "ngtcp2"    "$NGTCP2_REPO"    "$NGTCP2_COMMIT"
     clone_or_update "nghttp3"   "$NGHTTP3_REPO"   "$NGHTTP3_REF"
+    clone_or_update "libuv"     "$LIBUV_REPO"     "$LIBUV_TAG"
     ok "All dependencies fetched"
 }
 
@@ -147,6 +174,7 @@ cmd_build() {
     build_boringssl
     build_nghttp3
     build_ngtcp2
+    build_libuv
     ok "All dependencies built"
 }
 
@@ -158,7 +186,7 @@ cmd_all() {
 cmd_status() {
     echo "=== Dependency Status ==="
     echo ""
-    for dep in boringssl ngtcp2 nghttp3; do
+    for dep in boringssl ngtcp2 nghttp3 libuv; do
         local dir="${DEPS_DIR}/${dep}"
         if [ -d "$dir/.git" ]; then
             local hash
@@ -176,7 +204,9 @@ cmd_status() {
         "boringssl/build/libcrypto.a" \
         "nghttp3/build/lib/libnghttp3.a" \
         "ngtcp2/build/lib/libngtcp2.a" \
-        "ngtcp2/build/crypto/boringssl/libngtcp2_crypto_boringssl.a"; do
+        "ngtcp2/build/crypto/boringssl/libngtcp2_crypto_boringssl.a" \
+        "libuv/build/libuv.a" \
+        "libuv/build/libuv_a.a"; do
         if [ -f "${DEPS_DIR}/${f}" ]; then
             printf "  \033[32m✓\033[0m %s\n" "$f"
         else
@@ -190,6 +220,7 @@ cmd_clean() {
     rm -rf "${DEPS_DIR}/boringssl/build"
     rm -rf "${DEPS_DIR}/nghttp3/build"
     rm -rf "${DEPS_DIR}/ngtcp2/build"
+    rm -rf "${DEPS_DIR}/libuv/build"
     ok "Cleaned"
 }
 
@@ -211,6 +242,7 @@ Pinned versions:
   BoringSSL  ${BORINGSSL_COMMIT:0:12}  ${BORINGSSL_REPO}
   ngtcp2     ${NGTCP2_COMMIT:0:12}  ${NGTCP2_REPO}
   nghttp3    ${NGHTTP3_REF}          ${NGHTTP3_REPO} (fork)
+  libuv      ${LIBUV_TAG}            ${LIBUV_REPO}
 EOF
 }
 

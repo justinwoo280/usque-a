@@ -18,23 +18,40 @@
 #include "usque/route_windows.h"
 #endif
 
-#include <ev.h>
+#include <uv.h>
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#endif
+
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
 #include <vector>
 
+// ---- Platform socket type ----
+#ifdef _WIN32
+typedef SOCKET socket_t;
+#define INVALID_SOCK INVALID_SOCKET
+#define close_socket closesocket
+#else
+typedef int socket_t;
+#define INVALID_SOCK (-1)
+#define close_socket close
+#endif
+
 struct usque_tunnel {
     usque_tunnel_config_t  cfg;
     usque_recv_packet_cb   recv_cb;
     void                  *recv_userdata;
-    struct ev_loop        *loop;
+    uv_loop_t             *loop;
     usque::TlsContext     *tls_ctx;
     usque::QuicEngine      engine;
 
@@ -42,12 +59,19 @@ struct usque_tunnel {
     usque_tun_t           *tun;
     usque_dns_hijack_t    *dns_hj;
 
-    // libev watchers
-    ev_io                  udp_read;
-    ev_io                  tun_read;
-    ev_timer               quic_timer;
-    ev_async               stop_async;
-    ev_async               send_async;
+    // libuv handles
+    uv_poll_t              udp_poll;
+    uv_poll_t              tun_poll;       // Unix only
+    uv_timer_t             quic_timer;
+    uv_async_t             stop_async;
+    uv_async_t             send_async;
+    uv_async_t             tun_async;      // Windows only (TUN read thread signal)
+
+    // Windows TUN read thread
+#ifdef _WIN32
+    uv_thread_t            tun_thread;
+    bool                   tun_thread_running;
+#endif
 
     // Send buffer (for thread-safe send_packet)
     uint8_t                send_buf[65536];
@@ -56,61 +80,67 @@ struct usque_tunnel {
 
     bool                   running;
     bool                   post_noise_sent;
+
+    // Track active handles for cleanup
+    bool                   udp_poll_active;
+    bool                   tun_poll_active;
+    bool                   timer_active;
 };
 
 // ---- Forward declarations ----
 static void inject_post_noise(usque_tunnel *t);
+static void update_timer(usque_tunnel *t);
 
-// ---- libev callbacks ----
+// ---- Helper: update QUIC timer ----
 
-static void on_udp_read(EV_P_ ev_io *w, int revents) {
-    (void)revents;
-    auto *t = (usque_tunnel *)w->data;
+static void update_timer(usque_tunnel *t) {
+    uint64_t expiry = t->engine.get_expiry();
+    uint64_t now = usque_timestamp();
+    uint64_t timeout_ms;
+    if (expiry <= now) {
+        timeout_ms = 1;
+    } else {
+        timeout_ms = (expiry - now) / 1000000;  // ns → ms
+        if (timeout_ms == 0) timeout_ms = 1;
+    }
+    uv_timer_start(&t->quic_timer, [](uv_timer_t *handle) {
+        auto *tun = (usque_tunnel *)handle->data;
+
+        // Inject post-noise once when tunnel becomes ready
+        if (tun->engine.tunnel_ready && !tun->post_noise_sent) {
+            tun->post_noise_sent = true;
+            fprintf(stderr, "[tunnel] connected!\n");
+            inject_post_noise(tun);
+        }
+
+        tun->engine.on_expiry();
+        update_timer(tun);
+    }, timeout_ms, 0);
+}
+
+// ---- libuv callbacks ----
+
+static void on_udp_read(uv_poll_t *handle, int status, int events) {
+    (void)status; (void)events;
+    auto *t = (usque_tunnel *)handle->data;
 
     uint8_t buf[65536];
-    ssize_t nread = recv(w->fd, buf, sizeof(buf), 0);
+    ssize_t nread = recv((socket_t)t->engine.fd, buf, sizeof(buf), 0);
     if (nread <= 0) return;
 
     t->engine.on_read(buf, (size_t)nread);
     t->engine.on_write();
-
-    // Update timer
-    uint64_t expiry = t->engine.get_expiry();
-    uint64_t now = usque_timestamp();
-    ev_tstamp timeout;
-    if (expiry <= now) {
-        timeout = 0.001;
-    } else {
-        timeout = (ev_tstamp)(expiry - now) / 1e9;
-    }
-    ev_timer_set(&t->quic_timer, timeout, 0.0);
-    ev_timer_again(EV_A_ &t->quic_timer);
+    update_timer(t);
 }
 
-static void on_timer(EV_P_ ev_timer *w, int revents) {
-    (void)EV_A; (void)revents;
-    auto *t = (usque_tunnel *)w->data;
-
-    // Inject post-noise once when tunnel becomes ready
-    if (t->engine.tunnel_ready && !t->post_noise_sent) {
-        t->post_noise_sent = true;
-        fprintf(stderr, "[tunnel] connected!\n");
-        inject_post_noise(t);
-    }
-
-    t->engine.on_expiry();
-}
-
-static void on_stop(EV_P_ ev_async *w, int revents) {
-    (void)revents;
-    auto *t = (usque_tunnel *)w->data;
-    ev_break(EV_A_ EVBREAK_ALL);
+static void on_stop(uv_async_t *handle) {
+    auto *t = (usque_tunnel *)handle->data;
     t->running = false;
+    uv_stop(t->loop);
 }
 
-static void on_send(EV_P_ ev_async *w, int revents) {
-    (void)EV_A; (void)revents;
-    auto *t = (usque_tunnel *)w->data;
+static void on_send(uv_async_t *handle) {
+    auto *t = (usque_tunnel *)handle->data;
     if (t->send_pending && t->send_len > 0) {
         t->engine.send_packet(t->send_buf, t->send_len);
         t->send_pending = false;
@@ -118,29 +148,58 @@ static void on_send(EV_P_ ev_async *w, int revents) {
     }
 }
 
+// ---- TUN read (Unix: poll on fd, Windows: thread + async) ----
+
 #if defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
-static void on_tun_read(EV_P_ ev_io *w, int revents) {
-    (void)revents;
-    auto *t = (usque_tunnel *)w->data;
+static void on_tun_read(uv_poll_t *handle, int status, int events) {
+    (void)status; (void)events;
+    auto *t = (usque_tunnel *)handle->data;
 
     uint8_t buf[65536];
     int nread = usque_tun_read(t->tun, buf, sizeof(buf));
     if (nread <= 0) return;
 
-    // DNS hijack: rewrite outgoing DNS queries
     if (t->dns_hj) {
         usque_dns_hijack_rewrite_query(t->dns_hj, buf, nread);
     }
 
-    // Send into tunnel
     t->engine.send_packet(buf, (size_t)nread);
     t->engine.on_write();
 }
 #endif
 
+#ifdef _WIN32
+static void on_tun_async(uv_async_t *handle) {
+    auto *t = (usque_tunnel *)handle->data;
+
+    // Drain all available packets from wintun
+    uint8_t buf[65536];
+    int nread;
+    while ((nread = usque_tun_read(t->tun, buf, sizeof(buf))) > 0) {
+        if (t->dns_hj) {
+            usque_dns_hijack_rewrite_query(t->dns_hj, buf, nread);
+        }
+        t->engine.send_packet(buf, (size_t)nread);
+    }
+    t->engine.on_write();
+}
+
+static void tun_read_thread(void *arg) {
+    auto *t = (usque_tunnel *)arg;
+    void *event = usque_tun_read_event(t->tun);
+
+    while (t->tun_thread_running) {
+        DWORD result = WaitForSingleObject((HANDLE)event, 100);
+        if (result == WAIT_OBJECT_0 && t->tun_thread_running) {
+            uv_async_send(&t->tun_async);
+        }
+    }
+}
+#endif
+
 // ---- Pre-noise injection ----
 
-static void inject_pre_noise(int fd, const struct sockaddr *addr, socklen_t addrlen,
+static void inject_pre_noise(socket_t fd, const struct sockaddr *addr, socklen_t addrlen,
                              const usque_noise_config_t *noise) {
     if (!noise->enabled || noise->count <= 0) return;
 
@@ -151,7 +210,7 @@ static void inject_pre_noise(int fd, const struct sockaddr *addr, socklen_t addr
         }
         std::vector<uint8_t> payload((size_t)size);
         for (int j = 0; j < size; j++) payload[j] = (uint8_t)(rand() & 0xff);
-        sendto(fd, payload.data(), payload.size(), 0, addr, addrlen);
+        sendto(fd, (const char *)payload.data(), (int)payload.size(), 0, addr, addrlen);
 
         if (i < noise->count - 1) {
             int delay = noise->delay_min_ms;
@@ -159,14 +218,18 @@ static void inject_pre_noise(int fd, const struct sockaddr *addr, socklen_t addr
                 delay += rand() % (int)(noise->delay_max_ms - noise->delay_min_ms);
             }
             if (delay > 0) {
+#ifdef _WIN32
+                Sleep((DWORD)delay);
+#else
                 struct timespec ts = {0, (long)delay * 1000000L};
                 nanosleep(&ts, nullptr);
+#endif
             }
         }
     }
 }
 
-// ---- Post-noise injection (through the tunnel after CONNECT succeeds) ----
+// ---- Post-noise injection ----
 
 static void inject_post_noise(usque_tunnel *t) {
     const usque_noise_config_t *noise = &t->cfg.outbound.noise;
@@ -191,8 +254,12 @@ static void inject_post_noise(usque_tunnel *t) {
                 delay += rand() % (int)(noise->delay_max_ms - noise->delay_min_ms);
             }
             if (delay > 0) {
+#ifdef _WIN32
+                Sleep((DWORD)delay);
+#else
                 struct timespec ts = {0, (long)delay * 1000000L};
                 nanosleep(&ts, nullptr);
+#endif
             }
         }
     }
@@ -203,15 +270,16 @@ static void inject_post_noise(usque_tunnel *t) {
 // ---- Supervisor: single connection attempt ----
 
 static int run_connection(usque_tunnel *t) {
-    // 1. Create TUN device
     char errbuf[256] = {};
+
+    // 1. Create TUN device
     usque_tun_params_t tun_params = {
         t->cfg.tun.name,
         t->cfg.tun.mtu,
         t->cfg.account.ipv4,
         t->cfg.account.ipv6,
         t->cfg.tun.persist,
-        nullptr  /* wintun_dll: not used on Linux */
+        nullptr
     };
     t->tun = usque_tun_create(&tun_params, errbuf, sizeof(errbuf));
     if (!t->tun) {
@@ -226,20 +294,20 @@ static int run_connection(usque_tunnel *t) {
     t->dns_hj = usque_dns_hijack_create(hj_v4, hj_v6);
 
     // 3. Create UDP socket
-    int fd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (fd < 0) {
+    socket_t fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd == INVALID_SOCK) {
         perror("socket");
         usque_tun_destroy(t->tun); t->tun = nullptr;
         return -1;
     }
-    t->engine.fd = fd;
+    t->engine.fd = (int)fd;
 
-    // 4. Bind UDP socket to physical NIC (prevents routing loop)
+    // 4. Bind UDP socket to physical NIC
 #if defined(__linux__)
     if (t->cfg.tun.auto_route) {
         char phys_iface[64] = "";
         if (usque_route_detect_physical_iface(phys_iface, sizeof(phys_iface)) == 0) {
-            usque_route_bind_to_device(fd, phys_iface, errbuf, sizeof(errbuf));
+            usque_route_bind_to_device((int)fd, phys_iface, errbuf, sizeof(errbuf));
             fprintf(stderr, "[tunnel] UDP bound to %s\n", phys_iface);
         }
     }
@@ -247,7 +315,7 @@ static int run_connection(usque_tunnel *t) {
     if (t->cfg.tun.auto_route) {
         char phys_iface[64] = "";
         if (usque_route_detect_physical_iface(phys_iface, sizeof(phys_iface)) == 0) {
-            usque_route_bind_to_interface(fd, phys_iface, errbuf, sizeof(errbuf));
+            usque_route_bind_to_interface((int)fd, phys_iface, errbuf, sizeof(errbuf));
             fprintf(stderr, "[tunnel] UDP bound to %s\n", phys_iface);
         }
     }
@@ -259,18 +327,17 @@ static int run_connection(usque_tunnel *t) {
     addr.sin_port = htons((uint16_t)t->cfg.outbound.port);
     inet_pton(AF_INET, t->cfg.account.endpoint_v4, &addr.sin_addr);
 
-    // Pre-noise
     inject_pre_noise(fd, (struct sockaddr *)&addr, sizeof(addr),
                      &t->cfg.outbound.pre_noise);
 
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
         perror("connect");
-        close(fd); t->engine.fd = -1;
+        close_socket(fd); t->engine.fd = -1;
         usque_tun_destroy(t->tun); t->tun = nullptr;
         return -1;
     }
 
-    // 6. Setup routes (after connect, so endpoint bypass works)
+    // 6. Setup routes
 #if defined(__linux__)
     if (t->cfg.tun.auto_route) {
         const char *dns_arr[USQUE_MAX_DNS_COUNT];
@@ -299,44 +366,56 @@ static int run_connection(usque_tunnel *t) {
     }
 #endif
 
-    // 7. Setup QUIC engine with TUN write callback
+    // 7. Setup QUIC engine
     std::string err;
     auto recv_cb = [t](const uint8_t *pkt, size_t len) {
         uint8_t buf[65536];
         memcpy(buf, pkt, len);
-        // DNS hijack: rewrite response
         if (t->dns_hj) {
             usque_dns_hijack_rewrite_response(t->dns_hj, buf, (int)len);
         }
-        // Write to TUN
         if (t->tun) {
             usque_tun_write(t->tun, buf, (int)len);
         }
-        // Also call user callback
         if (t->recv_cb) t->recv_cb(buf, len, t->recv_userdata);
     };
 
-    if (t->engine.setup(&t->cfg, t->tls_ctx, fd, recv_cb, err) != 0) {
+    if (t->engine.setup(&t->cfg, t->tls_ctx, (int)fd, recv_cb, err) != 0) {
         fprintf(stderr, "[tunnel] engine setup failed: %s\n", err.c_str());
-        close(fd); t->engine.fd = -1;
+        close_socket(fd); t->engine.fd = -1;
         usque_tun_destroy(t->tun); t->tun = nullptr;
         return -1;
     }
 
-    // 8. Setup libev watchers
-    ev_io_init(&t->udp_read, on_udp_read, fd, EV_READ);
-    t->udp_read.data = t;
-    ev_io_start(t->loop, &t->udp_read);
+    // 8. Setup libuv watchers
+    uv_poll_init_socket(t->loop, &t->udp_poll, fd);
+    t->udp_poll.data = t;
+    uv_poll_start(&t->udp_poll, UV_READABLE, on_udp_read);
+    t->udp_poll_active = true;
 
 #if defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
-    ev_io_init(&t->tun_read, on_tun_read, usque_tun_fd(t->tun), EV_READ);
-    t->tun_read.data = t;
-    ev_io_start(t->loop, &t->tun_read);
+    int tun_fd = usque_tun_fd(t->tun);
+    if (tun_fd >= 0) {
+        uv_poll_init(t->loop, &t->tun_poll, tun_fd);
+        t->tun_poll.data = t;
+        uv_poll_start(&t->tun_poll, UV_READABLE, on_tun_read);
+        t->tun_poll_active = true;
+    }
 #endif
 
-    ev_timer_init(&t->quic_timer, on_timer, 0.001, 0.0);
+#ifdef _WIN32
+    // Start TUN read thread
+    t->tun_thread_running = true;
+    uv_async_init(t->loop, &t->tun_async, on_tun_async);
+    t->tun_async.data = t;
+    uv_thread_create(&t->tun_thread, tun_read_thread, t);
+#endif
+
+    // Start QUIC timer
     t->quic_timer.data = t;
-    ev_timer_again(t->loop, &t->quic_timer);
+    uv_timer_init(t->loop, &t->quic_timer);
+    t->timer_active = true;
+    update_timer(t);
 
     // 9. Kick off handshake
     t->post_noise_sent = false;
@@ -344,16 +423,35 @@ static int run_connection(usque_tunnel *t) {
 
     // 10. Run event loop
     t->running = true;
-    ev_run(t->loop, 0);
+    uv_run(t->loop, UV_RUN_DEFAULT);
 
-    // 11. Cleanup
-    ev_io_stop(t->loop, &t->udp_read);
+    // 11. Cleanup watchers
+    if (t->udp_poll_active) {
+        uv_poll_stop(&t->udp_poll);
+        t->udp_poll_active = false;
+    }
+
 #if defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
-    ev_io_stop(t->loop, &t->tun_read);
+    if (t->tun_poll_active) {
+        uv_poll_stop(&t->tun_poll);
+        t->tun_poll_active = false;
+    }
 #endif
-    ev_timer_stop(t->loop, &t->quic_timer);
+
+#ifdef _WIN32
+    t->tun_thread_running = false;
+    uv_thread_join(&t->tun_thread);
+    uv_close((uv_handle_t *)&t->tun_async, nullptr);
+#endif
+
+    if (t->timer_active) {
+        uv_timer_stop(&t->quic_timer);
+        uv_close((uv_handle_t *)&t->quic_timer, nullptr);
+        t->timer_active = false;
+    }
+
     t->engine.cleanup();
-    close(fd);
+    close_socket(fd);
     t->engine.fd = -1;
 
 #if defined(__linux__)
@@ -369,7 +467,13 @@ static int run_connection(usque_tunnel *t) {
     usque_dns_hijack_destroy(t->dns_hj); t->dns_hj = nullptr;
     usque_tun_destroy(t->tun); t->tun = nullptr;
 
-    return t->running ? 0 : -1;  // 0 = stop requested, -1 = error
+    return t->running ? 0 : -1;
+}
+
+// ---- Handle close callback for cleanup ----
+
+static void close_cb(uv_handle_t *handle) {
+    (void)handle;
 }
 
 // ---- Public C API ----
@@ -385,32 +489,26 @@ extern "C" usque_error_t usque_tunnel_new(const usque_tunnel_config_t *cfg,
     }
 
     auto *t = new usque_tunnel();
+    memset(t, 0, sizeof(usque_tunnel));
     t->cfg = *cfg;
     t->recv_cb = cb;
     t->recv_userdata = userdata;
-    t->running = false;
-    t->send_pending = false;
-    t->send_len = 0;
-    t->tun = nullptr;
-    t->dns_hj = nullptr;
-    t->post_noise_sent = false;
 
     // Create event loop
-    t->loop = ev_loop_new(EVFLAG_AUTO);
-    if (!t->loop) {
+    t->loop = (uv_loop_t *)malloc(sizeof(uv_loop_t));
+    if (uv_loop_init(t->loop) != 0) {
+        free(t->loop);
         delete t;
-        if (errbuf && errbuf_len) snprintf(errbuf, errbuf_len, "ev_loop_new failed");
+        if (errbuf && errbuf_len) snprintf(errbuf, errbuf_len, "uv_loop_init failed");
         return USQUE_ERR_INTERNAL;
     }
 
-    // Setup async watchers
-    ev_async_init(&t->stop_async, on_stop);
+    // Setup async handles
+    uv_async_init(t->loop, &t->stop_async, on_stop);
     t->stop_async.data = t;
-    ev_async_start(t->loop, &t->stop_async);
 
-    ev_async_init(&t->send_async, on_send);
+    uv_async_init(t->loop, &t->send_async, on_send);
     t->send_async.data = t;
-    ev_async_start(t->loop, &t->send_async);
 
     // Create TLS context
     std::string err;
@@ -422,9 +520,8 @@ extern "C" usque_error_t usque_tunnel_new(const usque_tunnel_config_t *cfg,
         err);
 
     if (!t->tls_ctx) {
-        ev_async_stop(t->loop, &t->stop_async);
-        ev_async_stop(t->loop, &t->send_async);
-        ev_loop_destroy(t->loop);
+        uv_loop_close(t->loop);
+        free(t->loop);
         delete t;
         if (errbuf && errbuf_len) snprintf(errbuf, errbuf_len, "TLS: %s", err.c_str());
         return USQUE_ERR_INTERNAL;
@@ -437,28 +534,24 @@ extern "C" usque_error_t usque_tunnel_new(const usque_tunnel_config_t *cfg,
 extern "C" usque_error_t usque_tunnel_run(usque_tunnel_t *t) {
     if (!t) return USQUE_ERR_INVALID_ARG;
 
-    while (t->running || !t->recv_cb) {
+    while (true) {
         fprintf(stderr, "[tunnel] connecting to %s:%d...\n",
                 t->cfg.account.endpoint_v4, t->cfg.outbound.port);
 
         int rv = run_connection(t);
-        if (rv == 0) break;  // stop requested
+        if (rv == 0) break;
 
         fprintf(stderr, "[tunnel] disconnected, reconnecting in %lldms...\n",
                 (long long)t->cfg.outbound.reconnect_delay_ms);
 
+#ifdef _WIN32
+        Sleep((DWORD)t->cfg.outbound.reconnect_delay_ms);
+#else
         struct timespec ts;
         ts.tv_sec = t->cfg.outbound.reconnect_delay_ms / 1000;
         ts.tv_nsec = (t->cfg.outbound.reconnect_delay_ms % 1000) * 1000000L;
         nanosleep(&ts, nullptr);
-
-        // Re-enable async watchers after ev_run returned
-        if (!ev_is_active(&t->stop_async)) {
-            ev_async_start(t->loop, &t->stop_async);
-        }
-        if (!ev_is_active(&t->send_async)) {
-            ev_async_start(t->loop, &t->send_async);
-        }
+#endif
     }
     return USQUE_OK;
 }
@@ -466,7 +559,7 @@ extern "C" usque_error_t usque_tunnel_run(usque_tunnel_t *t) {
 extern "C" void usque_tunnel_stop(usque_tunnel_t *t) {
     if (!t) return;
     t->running = false;
-    ev_async_send(t->loop, &t->stop_async);
+    uv_async_send(&t->stop_async);
 }
 
 extern "C" usque_error_t usque_tunnel_send_packet(usque_tunnel_t *t,
@@ -477,17 +570,26 @@ extern "C" usque_error_t usque_tunnel_send_packet(usque_tunnel_t *t,
     memcpy(t->send_buf, pkt, len);
     t->send_len = len;
     t->send_pending = true;
-    ev_async_send(t->loop, &t->send_async);
+    uv_async_send(&t->send_async);
     return USQUE_OK;
 }
 
 extern "C" void usque_tunnel_destroy(usque_tunnel_t *t) {
     if (!t) return;
-    if (t->loop) {
-        ev_async_stop(t->loop, &t->stop_async);
-        ev_async_stop(t->loop, &t->send_async);
-        ev_loop_destroy(t->loop);
+
+    // Close async handles before closing loop
+    if (uv_is_active((uv_handle_t *)&t->stop_async)) {
+        uv_close((uv_handle_t *)&t->stop_async, close_cb);
     }
+    if (uv_is_active((uv_handle_t *)&t->send_async)) {
+        uv_close((uv_handle_t *)&t->send_async, close_cb);
+    }
+
+    // Run loop to process close callbacks
+    uv_run(t->loop, UV_RUN_DEFAULT);
+    uv_loop_close(t->loop);
+    free(t->loop);
+
     delete t->tls_ctx;
     delete t;
 }
