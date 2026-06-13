@@ -60,7 +60,7 @@ static int add_endpoint_bypass(const char *endpoint_v4,
     snprintf(cmd, sizeof(cmd),
              "route add %s mask 255.255.255.255 %s metric 1 if %lu",
              endpoint_v4, inet_ntoa(gw), (unsigned long)phys_ifindex);
-    system(cmd);
+    if (system(cmd)) { /* best-effort */ }
     return 0;
 }
 
@@ -83,7 +83,7 @@ int usque_route_setup_windows(uint64_t luid_val,
     snprintf(cmd, sizeof(cmd),
              "route add 0.0.0.0 mask 0.0.0.0 0.0.0.0 metric 0 if %lu",
              (unsigned long)ifindex);
-    system(cmd);
+    if (system(cmd)) { /* best-effort */ }
 
     /* DNS configuration via SetInterfaceDnsSettings (Windows 10+) or netsh fallback */
     if (dns_count > 0 && dns_servers) {
@@ -108,17 +108,17 @@ int usque_route_setup_windows(uint64_t luid_val,
         snprintf(cmd, sizeof(cmd),
                  "netsh interface ip set dns name=\"%lu\" static %s",
                  (unsigned long)ifindex, dns_servers[0]);
-        system(cmd);
+        if (system(cmd)) { /* best-effort */ }
 
         for (int i = 1; i < dns_count; i++) {
             snprintf(cmd, sizeof(cmd),
                      "netsh interface ip add dns name=\"%lu\" %s index=%d",
                      (unsigned long)ifindex, dns_servers[i], i + 1);
-            system(cmd);
+            if (system(cmd)) { /* best-effort */ }
         }
 
         /* Flush DNS cache */
-        system("ipconfig /flushdns >nul 2>&1");
+        if (system("ipconfig /flushdns >nul 2>&1")) { /* best-effort */ }
     }
 
     return 0;
@@ -135,9 +135,9 @@ int usque_route_cleanup_windows(uint64_t luid_val,
     snprintf(cmd, sizeof(cmd),
              "route delete 0.0.0.0 mask 0.0.0.0 if %lu >nul 2>&1",
              (unsigned long)ifindex);
-    system(cmd);
+    if (system(cmd)) { /* best-effort */ }
 
-    system("ipconfig /flushdns >nul 2>&1");
+    if (system("ipconfig /flushdns >nul 2>&1")) { /* best-effort */ }
     return 0;
 }
 

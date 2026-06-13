@@ -24,6 +24,13 @@ info()  { echo -e "\033[1;34m[deps]\033[0m $*"; }
 ok()    { echo -e "\033[1;32m[deps]\033[0m $*"; }
 err()   { echo -e "\033[1;31m[deps]\033[0m $*" >&2; }
 
+get_nproc() {
+    if command -v nproc &>/dev/null; then nproc
+    elif [ -n "${NUMBER_OF_PROCESSORS:-}" ]; then echo "$NUMBER_OF_PROCESSORS"
+    elif command -v sysctl &>/dev/null; then sysctl -n hw.ncpu
+    else echo 4; fi
+}
+
 check_tool() {
     if ! command -v "$1" &>/dev/null; then
         err "Required tool not found: $1"
@@ -99,7 +106,7 @@ build_nghttp3() {
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON
 
     info "nghttp3: building..."
-    cmake --build "${dir}/build" -j"$(nproc)"
+    cmake --build "${dir}/build" -j"$(get_nproc)"
 
     ok "nghttp3: built"
 }
@@ -131,7 +138,7 @@ build_ngtcp2() {
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON
 
     info "ngtcp2: building..."
-    cmake --build "${dir}/build" -j"$(nproc)"
+    cmake --build "${dir}/build" -j"$(get_nproc)"
 
     ok "ngtcp2: built"
 }
@@ -154,7 +161,7 @@ build_libuv() {
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON
 
     info "libuv: building..."
-    cmake --build "${dir}/build" -j"$(nproc)"
+    cmake --build "${dir}/build" -j"$(get_nproc)"
 
     ok "libuv: built"
 }

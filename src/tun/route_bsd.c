@@ -78,20 +78,20 @@ int usque_route_setup_bsd(const char *tun_name,
     if (endpoint_v4 && endpoint_v4[0]) {
         snprintf(cmd, sizeof(cmd),
                  "route add %s/32 %s", endpoint_v4, gw_ip);
-        system(cmd);
+        if (system(cmd)) { /* best-effort */ }
     }
 
     /* Two /1 halves: override default route without deleting it */
     snprintf(cmd, sizeof(cmd), "route add 0.0.0.0/1 -interface %s", tun_name);
-    system(cmd);
+    if (system(cmd)) { /* best-effort */ }
     snprintf(cmd, sizeof(cmd), "route add 128.0.0.0/1 -interface %s", tun_name);
-    system(cmd);
+    if (system(cmd)) { /* best-effort */ }
 
     /* IPv6: same approach */
     snprintf(cmd, sizeof(cmd), "route add -inet6 ::/1 -interface %s", tun_name);
-    system(cmd);
+    if (system(cmd)) { /* best-effort */ }
     snprintf(cmd, sizeof(cmd), "route add -inet6 8000::/1 -interface %s", tun_name);
-    system(cmd);
+    if (system(cmd)) { /* best-effort */ }
 
     /* DNS configuration */
     if (dns_count > 0 && dns_servers) {
@@ -128,10 +128,10 @@ int usque_route_setup_bsd(const char *tun_name,
                 snprintf(tmp, sizeof(tmp), " %s", dns_servers[i]);
                 strcat(cmd, tmp);
             }
-            system(cmd);
+            if (system(cmd)) { /* best-effort */ }
             /* Flush DNS cache */
-            system("dscacheutil -flushcache 2>/dev/null");
-            system("killall -HUP mDNSResponder 2>/dev/null");
+            if (system("dscacheutil -flushcache 2>/dev/null")) { /* best-effort */ }
+            if (system("killall -HUP mDNSResponder 2>/dev/null")) { /* best-effort */ }
         } else
 #endif
         {
@@ -157,18 +157,18 @@ int usque_route_cleanup_bsd(const char *tun_name,
 
     /* Delete /1 routes */
     snprintf(cmd, sizeof(cmd), "route delete 0.0.0.0/1 -interface %s 2>/dev/null", tun_name);
-    system(cmd);
+    if (system(cmd)) { /* best-effort */ }
     snprintf(cmd, sizeof(cmd), "route delete 128.0.0.0/1 -interface %s 2>/dev/null", tun_name);
-    system(cmd);
+    if (system(cmd)) { /* best-effort */ }
     snprintf(cmd, sizeof(cmd), "route delete -inet6 ::/1 -interface %s 2>/dev/null", tun_name);
-    system(cmd);
+    if (system(cmd)) { /* best-effort */ }
     snprintf(cmd, sizeof(cmd), "route delete -inet6 8000::/1 -interface %s 2>/dev/null", tun_name);
-    system(cmd);
+    if (system(cmd)) { /* best-effort */ }
 
 #ifdef __APPLE__
     /* Reset DNS */
-    system("dscacheutil -flushcache 2>/dev/null");
-    system("killall -HUP mDNSResponder 2>/dev/null");
+    if (system("dscacheutil -flushcache 2>/dev/null")) { /* best-effort */ }
+    if (system("killall -HUP mDNSResponder 2>/dev/null")) { /* best-effort */ }
 #endif
 
     /* Restore resolv.conf if backed up */

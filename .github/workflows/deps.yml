@@ -94,11 +94,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Install dependencies
         shell: bash
         run: |
-          choco install ninja -y
-          echo "CMAKE=$(which cmake)" >> $GITHUB_ENV
+          choco install ninja nasm go -y
+          # Ensure NASM and Go are in PATH for bash
+          echo "/c/Program Files/NASM" >> $GITHUB_PATH
+          echo "/c/Program Files/Go/bin" >> $GITHUB_PATH
 
       - name: Fetch dependencies
         shell: bash

@@ -10,6 +10,13 @@ info()  { echo -e "\033[1;34m[build]\033[0m $*"; }
 ok()    { echo -e "\033[1;32m[build]\033[0m $*"; }
 err()   { echo -e "\033[1;31m[build]\033[0m $*" >&2; }
 
+get_nproc() {
+    if command -v nproc &>/dev/null; then nproc
+    elif [ -n "${NUMBER_OF_PROCESSORS:-}" ]; then echo "$NUMBER_OF_PROCESSORS"
+    elif command -v sysctl &>/dev/null; then sysctl -n hw.ncpu
+    else echo 4; fi
+}
+
 # Verify deps are built
 check_deps() {
     local missing=0
@@ -35,7 +42,7 @@ cmd_build() {
 
     local build_type="${BUILD_TYPE:-Release}"
     local shared_libs="OFF"
-    local jobs="${JOBS:-$(nproc)}"
+    local jobs="${JOBS:-$(get_nproc)}"
 
     info "Build type: ${build_type}"
     info "Parallel jobs: ${jobs}"
@@ -80,11 +87,24 @@ cmd_install() {
 cmd_release() {
     info "Building release..."
     BUILD_TYPE=Release cmd_build
+
+    # Detect binary name (Windows uses .exe)
+    local bin="${BUILD_DIR}/src/usque-a-cli"
+    if [ -f "${bin}.exe" ]; then
+        bin="${bin}.exe"
+    fi
+
     info "Stripping binary..."
-    strip -o "${BUILD_DIR}/src/usque-a-cli.stripped" "${BUILD_DIR}/src/usque-a-cli"
+    local stripped="${bin}.stripped"
+    if command -v strip &>/dev/null; then
+        strip -o "$stripped" "$bin" 2>/dev/null || cp "$bin" "$stripped"
+    else
+        cp "$bin" "$stripped"
+    fi
+
     local size
-    size=$(du -h "${BUILD_DIR}/src/usque-a-cli.stripped" | cut -f1)
-    ok "Release binary: ${BUILD_DIR}/src/usque-a-cli.stripped (${size})"
+    size=$(ls -lh "$stripped" | awk '{print $5}')
+    ok "Release binary: ${stripped} (${size})"
 }
 
 usage() {

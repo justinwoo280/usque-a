@@ -137,10 +137,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Install dependencies
         shell: bash
         run: |
-          choco install ninja -y
+          choco install ninja nasm go -y
+          echo "/c/Program Files/NASM" >> $GITHUB_PATH
+          echo "/c/Program Files/Go/bin" >> $GITHUB_PATH
 
       - name: Fetch and build dependencies
         shell: bash
@@ -163,7 +168,9 @@ jobs:
           VER="${{ inputs.version }}"
           NAME="usque-a-${VER}-windows-amd64"
           mkdir -p "${NAME}"
-          cp build/src/usque-a-cli.exe "${NAME}/usque-a-cli.exe"
+          # Find the release binary (may have .exe.stripped or .exe)
+          BIN=$(ls build/src/usque-a-cli*.stripped build/src/usque-a-cli.exe 2>/dev/null | head -1)
+          cp "$BIN" "${NAME}/usque-a-cli.exe"
           cp build/src/wintun.dll "${NAME}/wintun.dll"
           7z a "${NAME}.zip" "${NAME}"
           certutil -hashfile "${NAME}.zip" SHA256 > "${NAME}.zip.sha256"

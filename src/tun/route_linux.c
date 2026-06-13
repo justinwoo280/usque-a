@@ -203,10 +203,10 @@ static int dns_setup_resolvectl(const char *ifname,
     }
     /* Set catch-all domain routing */
     snprintf(cmd, sizeof(cmd), "resolvectl domain %s ~.", ifname);
-    (void)system(cmd);
+    if (system(cmd)) { /* best-effort */ }
     /* Enable default-route */
     snprintf(cmd, sizeof(cmd), "resolvectl default-route %s true", ifname);
-    (void)system(cmd);
+    if (system(cmd)) { /* best-effort */ }
     return 0;
 }
 
