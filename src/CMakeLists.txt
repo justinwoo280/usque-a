@@ -146,7 +146,7 @@ target_link_libraries(usque-a PUBLIC
 
 # Platform-specific link libraries
 if(WIN32)
-    target_link_libraries(usque-a PUBLIC ws2_32 psapi iphlpapi userenv crypt32)
+    target_link_libraries(usque-a PUBLIC ws2_32 psapi iphlpapi userenv crypt32 dbghelp)
 elseif(APPLE)
     find_library(COREFOUNDATION CoreFoundation)
     find_library(SECURITY Security)
@@ -166,6 +166,7 @@ set_target_properties(usque-a PROPERTIES
 target_compile_definitions(usque-a PRIVATE USQUE_BUILDING_LIBRARY)
 if(WIN32)
     target_compile_definitions(usque-a PRIVATE NOMINMAX)
+    target_compile_definitions(usque-a PUBLIC NGTCP2_STATICLIB NGHTTP3_STATICLIB)
 endif()
 
 # Main executable
