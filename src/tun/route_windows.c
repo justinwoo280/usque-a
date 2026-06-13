@@ -24,7 +24,7 @@ static int get_default_gateway(struct in_addr *gw, NET_IFINDEX *ifindex) {
     DWORD size = 0;
 
     GetIpForwardTable(NULL, &size, FALSE);
-    table = (PMIB_IPFORWARD_TABLE)malloc(size);
+    table = (PMIB_IPFORWARDTABLE)malloc(size);
     if (!table) return -1;
 
     if (GetIpForwardTable(table, &size, FALSE) != NO_ERROR) {
@@ -204,10 +204,10 @@ uint64_t usque_route_detect_physical_luid(void) {
 
         /* Skip non-up interfaces */
         if (row->OperStatus != IfOperStatusUp) continue;
-        if (row->Loopback) continue;
+        /* Skip loopback */
+        if (row->Type == IF_TYPE_SOFTWARE_LOOPBACK) continue;
 
-        /* Skip non-physical types: must have a physical connector */
-        if (!row->ConnectorPresent) continue;
+        /* Skip non-physical types */
         if (row->Type != IF_TYPE_ETHERNET_CSMACD &&
             row->Type != IF_TYPE_IEEE80211) continue;
 
@@ -241,9 +241,6 @@ uint64_t usque_route_detect_physical_luid(void) {
             score = 10;  /* Wired Ethernet */
         else if (row->Type == IF_TYPE_IEEE80211)
             score = 8;   /* WiFi */
-
-        /* Bonus for adapters with IPv4 (actually connected to network) */
-        if (row->Ipv4Indicator) score += 2;
 
         if (score > best_score) {
             best_score = score;

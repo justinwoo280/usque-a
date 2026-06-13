@@ -165,7 +165,7 @@ set_target_properties(usque-a PROPERTIES
 
 target_compile_definitions(usque-a PRIVATE USQUE_BUILDING_LIBRARY)
 if(WIN32)
-    target_compile_definitions(usque-a PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_compile_definitions(usque-a PRIVATE NOMINMAX)
 endif()
 
 # Main executable
