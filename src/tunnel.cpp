@@ -21,6 +21,9 @@
 #include <uv.h>
 
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #else
@@ -125,7 +128,7 @@ static void on_udp_read(uv_poll_t *handle, int status, int events) {
     auto *t = (usque_tunnel *)handle->data;
 
     uint8_t buf[65536];
-    ssize_t nread = recv((socket_t)t->engine.fd, buf, sizeof(buf), 0);
+    ssize_t nread = recv((socket_t)t->engine.fd, (char *)buf, sizeof(buf), 0);
     if (nread <= 0) return;
 
     t->engine.on_read(buf, (size_t)nread);

@@ -3,9 +3,18 @@
 #include <ngtcp2/ngtcp2_crypto.h>
 #include <openssl/rand.h>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#endif
+
 #include <cstring>
 #include <cstdio>
 
@@ -288,7 +297,7 @@ int QuicEngine::on_write() {
         }
 
         if (nwrite > 0) {
-            send(fd, buf, (size_t)nwrite, 0);
+            send(fd, (const char *)buf, (size_t)nwrite, 0);
         }
     }
 
@@ -299,7 +308,7 @@ int QuicEngine::on_write() {
         return -1;
     }
     if (nwrite > 0) {
-        send(fd, buf, (size_t)nwrite, 0);
+        send(fd, (const char *)buf, (size_t)nwrite, 0);
     }
 
     return 0;
@@ -351,7 +360,7 @@ int QuicEngine::send_packet(const uint8_t *ip_pkt, size_t pkt_len) {
     }
 
     if (nwrite > 0) {
-        send(fd, buf, (size_t)nwrite, 0);
+        send(fd, (const char *)buf, (size_t)nwrite, 0);
     }
     return 0;
 }
