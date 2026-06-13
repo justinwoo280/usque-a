@@ -17,20 +17,49 @@ get_nproc() {
     else echo 4; fi
 }
 
-# Verify deps are built
+# Check if a static library exists (checks both .a and .lib)
+check_lib() {
+    local dir="$1" base="$2"
+    [ -f "${dir}/${base}.a" ] || [ -f "${dir}/${base}.lib" ]
+}
+
+# Verify deps are built (cross-platform: checks .a and .lib)
 check_deps() {
     local missing=0
-    for f in \
-        "boringssl/build/libssl.a" \
-        "boringssl/build/libcrypto.a" \
-        "nghttp3/build/lib/libnghttp3.a" \
-        "ngtcp2/build/lib/libngtcp2.a" \
-        "ngtcp2/build/crypto/boringssl/libngtcp2_crypto_boringssl.a"; do
-        if [ ! -f "${DEPS_DIR}/${f}" ]; then
-            err "Missing: ${DEPS_DIR}/${f}"
-            missing=1
-        fi
-    done
+
+    # BoringSSL: libssl / ssl, libcrypto / crypto
+    if ! check_lib "${DEPS_DIR}/boringssl/build" "libssl" && \
+       ! check_lib "${DEPS_DIR}/boringssl/build" "ssl"; then
+        err "Missing: boringssl ssl library"
+        missing=1
+    fi
+    if ! check_lib "${DEPS_DIR}/boringssl/build" "libcrypto" && \
+       ! check_lib "${DEPS_DIR}/boringssl/build" "crypto"; then
+        err "Missing: boringssl crypto library"
+        missing=1
+    fi
+
+    # nghttp3
+    if ! check_lib "${DEPS_DIR}/nghttp3/build/lib" "libnghttp3" && \
+       ! check_lib "${DEPS_DIR}/nghttp3/build/lib" "nghttp3"; then
+        err "Missing: nghttp3 library"
+        missing=1
+    fi
+
+    # ngtcp2
+    if ! check_lib "${DEPS_DIR}/ngtcp2/build/lib" "libngtcp2" && \
+       ! check_lib "${DEPS_DIR}/ngtcp2/build/lib" "ngtcp2"; then
+        err "Missing: ngtcp2 library"
+        missing=1
+    fi
+
+    # ngtcp2 crypto boringssl
+    if ! check_lib "${DEPS_DIR}/ngtcp2/build/crypto/boringssl" "libngtcp2_crypto_boringssl" && \
+       ! check_lib "${DEPS_DIR}/ngtcp2/build/crypto/boringssl" "ngtcp2_crypto_boringssl"; then
+        err "Missing: ngtcp2_crypto_boringssl library"
+        missing=1
+    fi
+
     if [ "$missing" -eq 1 ]; then
         err "Run './deps.sh all' first to build dependencies"
         exit 1
@@ -49,10 +78,7 @@ cmd_build() {
 
     cmake -B "${BUILD_DIR}" -S "${SCRIPT_DIR}" \
         -DBUILD_SHARED_LIBS="${shared_libs}" \
-        -DCMAKE_BUILD_TYPE="${build_type}" \
-        -DBORINGSSL_DIR="${DEPS_DIR}/boringssl" \
-        -DNGTCP2_DIR="${DEPS_DIR}/ngtcp2" \
-        -DNGHTTP3_DIR="${DEPS_DIR}/nghttp3"
+        -DCMAKE_BUILD_TYPE="${build_type}"
 
     cmake --build "${BUILD_DIR}" -- -j"${jobs}"
 
