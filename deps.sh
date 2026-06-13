@@ -48,18 +48,17 @@ cmake_gen() {
     fi
 }
 
-# Convert MSYS path to Windows-native path (D:/a/... instead of /d/a/...)
+# Convert MSYS path to Windows-native path with forward slashes (D:/a/...)
+# CMake requires forward slashes; backslashes are treated as escape chars.
 to_winpath() {
     if is_windows && command -v cygpath &>/dev/null; then
-        cygpath -w "$1"
+        cygpath -m "$1"
     elif is_windows; then
-        # Manual conversion: /d/foo → D:/foo
+        # Manual conversion: /d/foo/bar → D:/foo/bar
         local p="$1"
-        if [[ "$p" =~ ^/([a-zA-Z])/(.*) ]]; then
-            echo "${BASH_REMATCH[1]^^}:/${BASH_REMATCH[2]}"
-        else
-            echo "$p"
-        fi
+        local drive="${p:1:1}"
+        local rest="${p:2}"
+        echo "${drive^^}:${rest}"
     else
         echo "$1"
     fi
