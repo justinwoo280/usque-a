@@ -1,6 +1,7 @@
 #include <usque/usque.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <cassert>
 #include <string>
@@ -152,7 +153,16 @@ static void test_save_roundtrip() {
     check("load for roundtrip", err == USQUE_OK);
     if (err != USQUE_OK) return;
 
+#ifdef _WIN32
+    std::string out_path_str;
+    const char *tmpdir = std::getenv("TEMP");
+    if (!tmpdir) tmpdir = std::getenv("TMP");
+    if (!tmpdir) tmpdir = ".";
+    out_path_str = std::string(tmpdir) + "\\usque_test_save.json";
+    const char *out_path = out_path_str.c_str();
+#else
     const char *out_path = "/tmp/usque_test_save.json";
+#endif
     err = usque_config_save_file(cfg, out_path, errbuf, sizeof(errbuf));
     check("save file", err == USQUE_OK);
     usque_config_destroy(cfg);
