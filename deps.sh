@@ -31,11 +31,40 @@ get_nproc() {
     else echo 4; fi
 }
 
+# Detect platform
+is_windows() {
+    [[ "${OS:-}" == "Windows_NT" ]] || [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "cygwin" ]]
+}
+
+# Static library extension
+static_ext() {
+    if is_windows; then echo "lib"; else echo "a"; fi
+}
+
+# CMake generator: Ninja everywhere (single-config, avoids MSVC Debug/Release subdirs)
+cmake_gen() {
+    if command -v ninja &>/dev/null; then
+        echo "-GNinja"
+    fi
+}
+
 check_tool() {
     if ! command -v "$1" &>/dev/null; then
         err "Required tool not found: $1"
         err "Install with: apt-get install -y $2"
         exit 1
+    fi
+}
+
+# Find a static library file, checking both .a and .lib
+find_static_lib() {
+    local dir="$1" base="$2"
+    if [ -f "${dir}/${base}.a" ]; then
+        echo "${dir}/${base}.a"
+    elif [ -f "${dir}/${base}.lib" ]; then
+        echo "${dir}/${base}.lib"
+    else
+        return 1
     fi
 }
 
@@ -65,23 +94,29 @@ clone_or_update() {
 # ---- Build BoringSSL ----
 build_boringssl() {
     local dir="${DEPS_DIR}/boringssl"
-    if [ -f "${dir}/build/libssl.a" ] && [ -f "${dir}/build/libcrypto.a" ]; then
+    if find_static_lib "${dir}/build" "libssl" &>/dev/null && \
+       find_static_lib "${dir}/build" "libcrypto" &>/dev/null; then
+        ok "BoringSSL: already built"
+        return
+    fi
+    # Also check Windows naming: ssl.lib / crypto.lib
+    if find_static_lib "${dir}/build" "ssl" &>/dev/null && \
+       find_static_lib "${dir}/build" "crypto" &>/dev/null; then
         ok "BoringSSL: already built"
         return
     fi
 
     check_tool cmake cmake
     check_tool go golang
-    check_tool ninja ninja-build
 
     info "BoringSSL: configuring..."
     cmake -B "${dir}/build" -S "${dir}" \
-        -GNinja \
+        $(cmake_gen) \
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
         -DCMAKE_BUILD_TYPE=Release
 
     info "BoringSSL: building (this takes a while)..."
-    ninja -C "${dir}/build" ssl crypto
+    cmake --build "${dir}/build" -j"$(get_nproc)" --target ssl crypto
 
     ok "BoringSSL: built"
 }
@@ -89,7 +124,8 @@ build_boringssl() {
 # ---- Build nghttp3 ----
 build_nghttp3() {
     local dir="${DEPS_DIR}/nghttp3"
-    if [ -f "${dir}/build/lib/libnghttp3.a" ]; then
+    if find_static_lib "${dir}/build/lib" "libnghttp3" &>/dev/null || \
+       find_static_lib "${dir}/build/lib" "nghttp3" &>/dev/null; then
         ok "nghttp3: already built"
         return
     fi
@@ -98,6 +134,7 @@ build_nghttp3() {
 
     info "nghttp3: configuring..."
     cmake -B "${dir}/build" -S "${dir}" \
+        $(cmake_gen) \
         -DENABLE_SHARED_LIB=OFF \
         -DENABLE_STATIC_LIB=ON \
         -DENABLE_LIB_ONLY=ON \
@@ -116,23 +153,34 @@ build_ngtcp2() {
     local dir="${DEPS_DIR}/ngtcp2"
     local bssl_dir="${DEPS_DIR}/boringssl"
 
-    if [ -f "${dir}/build/lib/libngtcp2.a" ] && \
-       [ -f "${dir}/build/crypto/boringssl/libngtcp2_crypto_boringssl.a" ]; then
+    if find_static_lib "${dir}/build/lib" "libngtcp2" &>/dev/null || \
+       find_static_lib "${dir}/build/lib" "ngtcp2" &>/dev/null; then
         ok "ngtcp2: already built"
         return
     fi
 
     check_tool cmake cmake
 
+    # Find BoringSSL libraries (platform-aware)
+    local ssl_lib crypto_lib
+    ssl_lib=$(find_static_lib "${bssl_dir}/build" "libssl" 2>/dev/null || \
+              find_static_lib "${bssl_dir}/build" "ssl")
+    crypto_lib=$(find_static_lib "${bssl_dir}/build" "libcrypto" 2>/dev/null || \
+                 find_static_lib "${bssl_dir}/build" "crypto")
+
     info "ngtcp2: configuring with BoringSSL..."
+    info "ngtcp2: ssl_lib=${ssl_lib}"
+    info "ngtcp2: crypto_lib=${crypto_lib}"
+
     cmake -B "${dir}/build" -S "${dir}" \
+        $(cmake_gen) \
         -DENABLE_SHARED_LIB=OFF \
         -DENABLE_STATIC_LIB=ON \
         -DENABLE_LIB_ONLY=ON \
         -DENABLE_OPENSSL=OFF \
         -DENABLE_BORINGSSL=ON \
         -DBORINGSSL_INCLUDE_DIR="${bssl_dir}/include" \
-        -DBORINGSSL_LIBRARIES="${bssl_dir}/build/libssl.a;${bssl_dir}/build/libcrypto.a" \
+        -DBORINGSSL_LIBRARIES="${ssl_lib};${crypto_lib}" \
         -DBUILD_TESTING=OFF \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON
@@ -146,7 +194,9 @@ build_ngtcp2() {
 # ---- Build libuv ----
 build_libuv() {
     local dir="${DEPS_DIR}/libuv"
-    if [ -f "${dir}/build/libuv.a" ] || [ -f "${dir}/build/libuv_a.a" ]; then
+    if find_static_lib "${dir}/build" "libuv_a" &>/dev/null || \
+       find_static_lib "${dir}/build" "libuv" &>/dev/null || \
+       find_static_lib "${dir}/build" "uv_a" &>/dev/null; then
         ok "libuv: already built"
         return
     fi
@@ -155,6 +205,7 @@ build_libuv() {
 
     info "libuv: configuring..."
     cmake -B "${dir}/build" -S "${dir}" \
+        $(cmake_gen) \
         -DBUILD_SHARED_LIBS=OFF \
         -DLIBUV_BUILD_TESTS=OFF \
         -DCMAKE_BUILD_TYPE=Release \
@@ -206,18 +257,22 @@ cmd_status() {
     echo ""
     echo "=== Build Artifacts ==="
     echo ""
+    local ext
+    ext=$(static_ext)
     for f in \
-        "boringssl/build/libssl.a" \
-        "boringssl/build/libcrypto.a" \
-        "nghttp3/build/lib/libnghttp3.a" \
-        "ngtcp2/build/lib/libngtcp2.a" \
-        "ngtcp2/build/crypto/boringssl/libngtcp2_crypto_boringssl.a" \
-        "libuv/build/libuv.a" \
-        "libuv/build/libuv_a.a"; do
+        "boringssl/build/ssl.${ext}" \
+        "boringssl/build/libssl.${ext}" \
+        "boringssl/build/crypto.${ext}" \
+        "boringssl/build/libcrypto.${ext}" \
+        "nghttp3/build/lib/nghttp3.${ext}" \
+        "nghttp3/build/lib/libnghttp3.${ext}" \
+        "ngtcp2/build/lib/ngtcp2.${ext}" \
+        "ngtcp2/build/lib/libngtcp2.${ext}" \
+        "libuv/build/uv_a.${ext}" \
+        "libuv/build/libuv_a.${ext}" \
+        "libuv/build/libuv.${ext}"; do
         if [ -f "${DEPS_DIR}/${f}" ]; then
             printf "  \033[32m✓\033[0m %s\n" "$f"
-        else
-            printf "  \033[31m✗\033[0m %s\n" "$f"
         fi
     done
 }
@@ -240,7 +295,7 @@ Usage: $(basename "$0") <command>
 
 Commands:
   fetch     Clone/update dependencies at pinned commits
-  build     Build all dependencies (BoringSSL → nghttp3 → ngtcp2)
+  build     Build all dependencies (BoringSSL → nghttp3 → ngtcp2 → libuv)
   all       fetch + build
   status    Show dependency and build status
   clean     Remove build artifacts

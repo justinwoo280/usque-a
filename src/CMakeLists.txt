@@ -1,16 +1,87 @@
+# Helper: find a static library file checking both .a and .lib
+function(find_static_lib RESULT_VAR DIR BASENAME)
+    foreach(name "${BASENAME}.a" "${BASENAME}.lib")
+        if(EXISTS "${DIR}/${name}")
+            set(${RESULT_VAR} "${DIR}/${name}" PARENT_SCOPE)
+            return()
+        endif()
+    endforeach()
+    set(${RESULT_VAR} "${RESULT_VAR}-NOTFOUND" PARENT_SCOPE)
+endfunction()
+
 # External library paths — support both layouts:
 #   Local dev:  ../boringssl, ../ngtcp2, ../nghttp3 (siblings)
 #   CI/script:  deps/boringssl, deps/ngtcp2, deps/nghttp3 (subdirectory)
-if(EXISTS "${CMAKE_SOURCE_DIR}/deps/boringssl/build/libssl.a")
+if(EXISTS "${CMAKE_SOURCE_DIR}/deps/boringssl/build")
     set(BORINGSSL_DIR "${CMAKE_SOURCE_DIR}/deps/boringssl")
     set(NGTCP2_DIR "${CMAKE_SOURCE_DIR}/deps/ngtcp2")
     set(NGHTTP3_DIR "${CMAKE_SOURCE_DIR}/deps/nghttp3")
+    set(LIBUV_DIR "${CMAKE_SOURCE_DIR}/deps/libuv")
 else()
     set(BORINGSSL_DIR "${CMAKE_SOURCE_DIR}/../boringssl")
     set(NGTCP2_DIR "${CMAKE_SOURCE_DIR}/../ngtcp2")
     set(NGHTTP3_DIR "${CMAKE_SOURCE_DIR}/../nghttp3")
+    set(LIBUV_DIR "${CMAKE_SOURCE_DIR}/../libuv")
 endif()
 
+# ---- Find BoringSSL libraries (platform-aware) ----
+find_static_lib(BORINGSSL_SSL_LIB "${BORINGSSL_DIR}/build" "libssl")
+if(NOT BORINGSSL_SSL_LIB)
+    find_static_lib(BORINGSSL_SSL_LIB "${BORINGSSL_DIR}/build" "ssl")
+endif()
+find_static_lib(BORINGSSL_CRYPTO_LIB "${BORINGSSL_DIR}/build" "libcrypto")
+if(NOT BORINGSSL_CRYPTO_LIB)
+    find_static_lib(BORINGSSL_CRYPTO_LIB "${BORINGSSL_DIR}/build" "crypto")
+endif()
+
+# ---- Find ngtcp2 libraries ----
+find_static_lib(NGTCP2_LIB "${NGTCP2_DIR}/build/lib" "libngtcp2")
+if(NOT NGTCP2_LIB)
+    find_static_lib(NGTCP2_LIB "${NGTCP2_DIR}/build/lib" "ngtcp2")
+endif()
+if(NOT NGTCP2_LIB)
+    # Autotools fallback
+    find_static_lib(NGTCP2_LIB "${NGTCP2_DIR}/lib/.libs" "libngtcp2")
+endif()
+find_static_lib(NGTCP2_CRYPTO_BSSL_LIB "${NGTCP2_DIR}/build/crypto/boringssl" "libngtcp2_crypto_boringssl")
+if(NOT NGTCP2_CRYPTO_BSSL_LIB)
+    find_static_lib(NGTCP2_CRYPTO_BSSL_LIB "${NGTCP2_DIR}/build/crypto/boringssl" "ngtcp2_crypto_boringssl")
+endif()
+if(NOT NGTCP2_CRYPTO_BSSL_LIB)
+    # Autotools fallback
+    find_static_lib(NGTCP2_CRYPTO_BSSL_LIB "${NGTCP2_DIR}/crypto/boringssl" "libngtcp2_crypto_boringssl")
+endif()
+
+# ---- Find nghttp3 library ----
+find_static_lib(NGHTTP3_LIB "${NGHTTP3_DIR}/build/lib" "libnghttp3")
+if(NOT NGHTTP3_LIB)
+    find_static_lib(NGHTTP3_LIB "${NGHTTP3_DIR}/build/lib" "nghttp3")
+endif()
+if(NOT NGHTTP3_LIB)
+    # Autotools fallback (build/ is --prefix)
+    find_static_lib(NGHTTP3_LIB "${NGHTTP3_DIR}/build/lib" "libnghttp3")
+endif()
+
+# ---- Find libuv ----
+set(LIBUV_USE_SYSTEM FALSE)
+find_static_lib(LIBUV_LIB "${LIBUV_DIR}/build" "libuv_a")
+if(NOT LIBUV_LIB)
+    find_static_lib(LIBUV_LIB "${LIBUV_DIR}/build" "uv_a")
+endif()
+if(NOT LIBUV_LIB)
+    find_static_lib(LIBUV_LIB "${LIBUV_DIR}/build" "libuv")
+endif()
+if(NOT LIBUV_LIB)
+    # Fallback to system libuv
+    find_path(LIBUV_INCLUDE_DIR uv.h HINTS /opt/homebrew/include /usr/local/include /usr/include)
+    find_library(LIBUV_LIB NAMES uv_a uv HINTS /opt/homebrew/lib /usr/local/lib /usr/lib)
+    if(NOT LIBUV_INCLUDE_DIR OR NOT LIBUV_LIB)
+        message(FATAL_ERROR "libuv not found. Run ./deps.sh all or install libuv-dev")
+    endif()
+    set(LIBUV_USE_SYSTEM TRUE)
+endif()
+
+# ---- Main library ----
 add_library(usque-a
     error.cpp
     version.cpp
@@ -33,31 +104,15 @@ add_library(usque-a
 # Platform-specific TUN/route
 if(WIN32)
     target_sources(usque-a PRIVATE tun/tun_windows.c tun/route_windows.c)
-    target_link_libraries(usque-a PUBLIC ws2_32 iphlpapi)
 elseif(APPLE)
     target_sources(usque-a PRIVATE tun/tun_darwin.c tun/route_bsd.c)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
     target_sources(usque-a PRIVATE tun/tun_freebsd.c tun/route_bsd.c)
 else()
-    # Linux and other Unix
     target_sources(usque-a PRIVATE tun/tun_linux.c tun/route_linux.c)
 endif()
 
-# Find libuv (built from deps or sibling directory)
-if(EXISTS "${CMAKE_SOURCE_DIR}/deps/libuv/build/libuv_a.a")
-    set(LIBUV_DIR "${CMAKE_SOURCE_DIR}/deps/libuv")
-elseif(EXISTS "${CMAKE_SOURCE_DIR}/../libuv/build/libuv_a.a")
-    set(LIBUV_DIR "${CMAKE_SOURCE_DIR}/../libuv")
-else()
-    # Try system libuv as fallback
-    find_path(LIBUV_INCLUDE_DIR uv.h HINTS /opt/homebrew/include /usr/local/include /usr/include)
-    find_library(LIBUV_LIBRARY NAMES uv_a uv HINTS /opt/homebrew/lib /usr/local/lib /usr/lib)
-    if(NOT LIBUV_INCLUDE_DIR OR NOT LIBUV_LIBRARY)
-        message(FATAL_ERROR "libuv not found. Run ./deps.sh all or install libuv-dev")
-    endif()
-    set(LIBUV_USE_SYSTEM TRUE)
-endif()
-
+# Include directories
 target_include_directories(usque-a BEFORE
     PUBLIC
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
@@ -78,29 +133,26 @@ else()
     target_include_directories(usque-a BEFORE PRIVATE ${LIBUV_DIR}/include)
 endif()
 
+# Link libraries
 target_link_libraries(usque-a PUBLIC
     rapidjson
-    ${NGTCP2_DIR}/build/lib/libngtcp2.a
-    ${NGTCP2_DIR}/build/crypto/boringssl/libngtcp2_crypto_boringssl.a
-    ${NGHTTP3_DIR}/build/lib/libnghttp3.a
-    ${BORINGSSL_DIR}/build/libssl.a
-    ${BORINGSSL_DIR}/build/libcrypto.a
-    pthread
+    ${NGTCP2_LIB}
+    ${NGTCP2_CRYPTO_BSSL_LIB}
+    ${NGHTTP3_LIB}
+    ${BORINGSSL_SSL_LIB}
+    ${BORINGSSL_CRYPTO_LIB}
+    ${LIBUV_LIB}
 )
 
-if(LIBUV_USE_SYSTEM)
-    target_link_libraries(usque-a PUBLIC ${LIBUV_LIBRARY})
-else()
-    target_link_libraries(usque-a PUBLIC ${LIBUV_DIR}/build/libuv_a.a)
-endif()
-
-# Platform-specific libraries for libuv
+# Platform-specific link libraries
 if(WIN32)
-    target_link_libraries(usque-a PUBLIC ws2_32 psapi iphlpapi userenv)
+    target_link_libraries(usque-a PUBLIC ws2_32 psapi iphlpapi userenv crypt32)
 elseif(APPLE)
     find_library(COREFOUNDATION CoreFoundation)
     find_library(SECURITY Security)
     target_link_libraries(usque-a PUBLIC ${COREFOUNDATION} ${SECURITY})
+else()
+    target_link_libraries(usque-a PUBLIC pthread)
 endif()
 
 set_target_properties(usque-a PROPERTIES
