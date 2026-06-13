@@ -3,9 +3,21 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+#define close_socket closesocket
+#else
 #include <sys/socket.h>
 #include <netdb.h>
 #include <unistd.h>
+#define close_socket close
+#endif
+
 #include <cstring>
 #include <cstdio>
 
@@ -21,11 +33,11 @@ static int tcp_connect(const char *host, int port) {
 
     if (getaddrinfo(host, port_str, &hints, &res) != 0) return -1;
 
-    int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    int fd = (int)socket(res->ai_family, res->ai_socktype, res->ai_protocol);
     if (fd < 0) { freeaddrinfo(res); return -1; }
 
-    if (connect(fd, res->ai_addr, res->ai_addrlen) != 0) {
-        close(fd);
+    if (connect(fd, res->ai_addr, (int)res->ai_addrlen) != 0) {
+        close_socket(fd);
         freeaddrinfo(res);
         return -1;
     }
@@ -39,6 +51,12 @@ HttpResponse https_request(const char *host, int port,
                            const char *body, size_t body_len) {
     HttpResponse resp;
 
+#ifdef _WIN32
+    // Initialize Winsock
+    WSADATA wsaData;
+    WSAStartup(MAKEWORD(2, 2), &wsaData);
+#endif
+
     // TCP connect
     int fd = tcp_connect(host, port);
     if (fd < 0) {
@@ -48,17 +66,17 @@ HttpResponse https_request(const char *host, int port,
 
     // TLS
     SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
-    if (!ctx) { close(fd); resp.error = "SSL_CTX_new failed"; return resp; }
+    if (!ctx) { close_socket(fd); resp.error = "SSL_CTX_new failed"; return resp; }
 
     SSL *ssl = SSL_new(ctx);
-    if (!ssl) { SSL_CTX_free(ctx); close(fd); resp.error = "SSL_new failed"; return resp; }
+    if (!ssl) { SSL_CTX_free(ctx); close_socket(fd); resp.error = "SSL_new failed"; return resp; }
 
     SSL_set_tlsext_host_name(ssl, host);
     SSL_set_fd(ssl, fd);
 
     if (SSL_connect(ssl) != 1) {
         resp.error = "TLS handshake failed";
-        SSL_free(ssl); SSL_CTX_free(ctx); close(fd);
+        SSL_free(ssl); SSL_CTX_free(ctx); close_socket(fd);
         return resp;
     }
 
@@ -135,7 +153,12 @@ done:
     SSL_shutdown(ssl);
     SSL_free(ssl);
     SSL_CTX_free(ctx);
-    close(fd);
+    close_socket(fd);
+
+#ifdef _WIN32
+    WSACleanup();
+#endif
+
     return resp;
 }
 
